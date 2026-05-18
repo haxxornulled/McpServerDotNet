@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+  <PropertyGroup>
+    <RootNamespace>McpServer.Host</RootNamespace>
+    <AssemblyName>McpServer.Host</AssemblyName>
+    <OutputType>Exe</OutputType>
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>mcpserver</ToolCommandName>
+    <PackageId>McpServer.Host</PackageId>
+    <Authors>haxxornulled</Authors>
+    <Description>Model Context Protocol server for .NET 10 with workspace-aware filesystem tools, activity routing, optional shell execution, optional local inference, and optional SSH and web automation.</Description>
+    <PackageTags>mcp;mcp-server;model-context-protocol;dotnet-tool;stdio;lm-studio;github-copilot;ollama;local-llm;ai-agents;workspace;filesystem;shell-execution;ssh;web-search</PackageTags>
+    <PackageProjectUrl>https://github.com/haxxornulled/McpServerDotNet</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/haxxornulled/McpServerDotNet</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" Link="README.md" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Autofac" />
+    <PackageReference Include="Autofac.Extensions.DependencyInjection" />
+    <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="Serilog.Sinks.Console" />
+    <PackageReference Include="Serilog.Sinks.File" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\McpServer.Protocol\McpServer.Protocol.csproj" />
+    <ProjectReference Include="..\McpServer.Application\McpServer.Application.csproj" />
+    <ProjectReference Include="..\McpServer.Infrastructure\McpServer.Infrastructure.csproj" />
+  </ItemGroup>
+  <Target Name="StopRunningHostProcessesBeforeBuild"
+          BeforeTargets="PrepareForBuild"
+          Condition="'$(OS)' == 'Windows_NT' and '$(DesignTimeBuild)' != 'true'">
+    <PropertyGroup>
+      <_HostExecutablePath>$([System.IO.Path]::GetFullPath('$(TargetDir)$(AssemblyName).exe'))</_HostExecutablePath>
+      <_StopRunningHostScript>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\scripts\Stop-RunningMcpServerHost.ps1'))</_StopRunningHostScript>
+    </PropertyGroup>
+    <Exec Command="powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(_StopRunningHostScript)&quot; -ExecutablePath &quot;$(_HostExecutablePath)&quot;" />
+  </Target>
+</Project>

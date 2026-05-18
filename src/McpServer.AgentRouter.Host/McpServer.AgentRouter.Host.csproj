@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <RootNamespace>McpServer.AgentRouter.Host</RootNamespace>
+    <AssemblyName>McpServer.AgentRouter.Host</AssemblyName>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Autofac" />
+    <PackageReference Include="Autofac.Extensions.DependencyInjection" />
+    <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="Serilog.Sinks.Console" />
+    <PackageReference Include="Serilog.Sinks.File" />
+    <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\McpServer.AgentRouter.Application\McpServer.AgentRouter.Application.csproj" />
+    <ProjectReference Include="..\McpServer.AgentRouter.Infrastructure\McpServer.AgentRouter.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

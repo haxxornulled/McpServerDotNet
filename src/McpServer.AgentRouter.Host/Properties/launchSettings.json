@@ -1,0 +1,18 @@
+{
+  "profiles": {
+    "McpServer.AgentRouter.Host": {
+      "commandName": "Project",
+      "launchBrowser": false,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "AgentRouter__BindUrl": "http://127.0.0.1:5177",
+        "AgentRouter__RunStorage__RootPath": "..\\..\\workspace\\artifacts\\agent-runs",
+        "AgentRouter__McpServer__WorkspaceRoot": "..\\..\\workspace",
+        "McpServer__Workspace__RootPath": "workspace",
+        "AgentRouter__ShellExecution__WorkspaceRoot": "..\\..\\workspace",
+        "AgentRouter__ShellExecution__WorkingDirectoryRoot": "..\\..\\workspace"
+      },
+      "applicationUrl": "http://127.0.0.1:5177"
+    }
+  }
+}

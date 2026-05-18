@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>McpServer.AgentRouter.UnitTests</RootNamespace>
+    <AssemblyName>McpServer.AgentRouter.UnitTests</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="NSubstitute" />
+    <PackageReference Include="coverlet.collector">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\McpServer.AgentRouter.Application\McpServer.AgentRouter.Application.csproj" />
+    <ProjectReference Include="..\..\src\McpServer.AgentRouter.Infrastructure\McpServer.AgentRouter.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\McpServer.AgentRouter.Domain\McpServer.AgentRouter.Domain.csproj" />
+  </ItemGroup>
+</Project>

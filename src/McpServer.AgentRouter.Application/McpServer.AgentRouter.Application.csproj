@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>McpServer.AgentRouter.Application</RootNamespace>
+    <AssemblyName>McpServer.AgentRouter.Application</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="LanguageExt.Core" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\McpServer.AgentRouter.Domain\McpServer.AgentRouter.Domain.csproj" />
+  </ItemGroup>
+</Project>

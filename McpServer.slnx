@@ -1,0 +1,15 @@
+<Solution>
+  <Project Path="src/McpServer.Domain/McpServer.Domain.csproj" />
+  <Project Path="src/McpServer.Application/McpServer.Application.csproj" />
+  <Project Path="src/McpServer.Protocol/McpServer.Protocol.csproj" />
+  <Project Path="src/McpServer.Infrastructure/McpServer.Infrastructure.csproj" />
+  <Project Path="src/McpServer.Host/McpServer.Host.csproj" />
+  <Project Path="tests/McpServer.UnitTests/McpServer.UnitTests.csproj" />
+  <Project Path="tests/McpServer.IntegrationTests/McpServer.IntegrationTests.csproj" />
+  <Project Path="src/McpServer.AgentRouter.Domain/McpServer.AgentRouter.Domain.csproj" />
+  <Project Path="src/McpServer.AgentRouter.Application/McpServer.AgentRouter.Application.csproj" />
+  <Project Path="src/McpServer.AgentRouter.Infrastructure/McpServer.AgentRouter.Infrastructure.csproj" />
+  <Project Path="src/McpServer.AgentRouter.Host/McpServer.AgentRouter.Host.csproj" />
+  <Project Path="tests/McpServer.AgentRouter.UnitTests/McpServer.AgentRouter.UnitTests.csproj" />
+  <Project Path="tools/McpServer.AgentRouter.Tools/McpServer.AgentRouter.Tools.csproj" />
+</Solution>

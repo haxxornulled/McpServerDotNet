@@ -1,0 +1,5 @@
+
+
+namespace McpServer.Application.WebSearch
+{
+}

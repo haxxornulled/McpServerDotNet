@@ -1,0 +1,35 @@
+  
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>McpServer.Infrastructure</RootNamespace>
+    <AssemblyName>McpServer.Infrastructure</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="LanguageExt.Core" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="SSH.NET" />
+    <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="Serilog.Sinks.Console" />
+    <PackageReference Include="Serilog.Sinks.File" />
+    <PackageReference Include="Serilog.Sinks.Async" />
+    <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers" PrivateAssets="all" />
+  </ItemGroup>
+
+    <ItemGroup>
+      <PackageReference Include="VapeCache.Abstractions" />
+      <PackageReference Include="VapeCache.Core" />
+      <PackageReference Include="VapeCache.Extensions.DependencyInjection" />
+    <PackageReference Include="VapeCache.Runtime" />
+    </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\McpServer.Application\McpServer.Application.csproj" />
+    <ProjectReference Include="..\McpServer.Domain\McpServer.Domain.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Update="Ollama\OllamaInferenceOptions.cs" />
+    <Compile Update="Ollama\OllamaInferenceService.cs" />
+  </ItemGroup>
+
+</Project>

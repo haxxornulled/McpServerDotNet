@@ -1,0 +1,25 @@
+bin/
+obj/
+.vs/
+.vscode/
+.ai/
+.codex/
+.run/
+TestResults/
+logs/
+*.lscache
+*.log
+src/McpServer.Host/workspace/
+artifacts/
+inference-smoke-results.json
+tmp-inference-smoke-console.txt
+.mcp.json
+test.tmp
+/*.zip
+# Local AgentRouter operator profiles. Do not commit machine/host inventory.
+config/agentrouter/*.local.json
+workspace/
+src/McpServer.AgentRouter.Host/workspace/
+src/*/logs/
+tests/*/logs/
+tools/*/logs/
