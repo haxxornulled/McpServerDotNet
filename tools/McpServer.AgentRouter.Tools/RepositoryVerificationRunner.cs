@@ -40,10 +40,17 @@ internal sealed class RepositoryVerificationSettings
 internal sealed class RepositoryVerificationRunner
 {
     private readonly RepositoryVerificationSettings _settings;
+    private readonly IProcessRunner _processRunner;
 
     public RepositoryVerificationRunner(RepositoryVerificationSettings settings)
+        : this(settings, new ProcessRunner())
+    {
+    }
+
+    public RepositoryVerificationRunner(RepositoryVerificationSettings settings, IProcessRunner processRunner)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _processRunner = processRunner ?? throw new ArgumentNullException(nameof(processRunner));
     }
 
     public async Task<int> RunAsync(CancellationToken cancellationToken)
@@ -120,7 +127,7 @@ internal sealed class RepositoryVerificationRunner
         ConsoleWriter.WriteSection(title);
         ConsoleWriter.WriteInfo($"dotnet {string.Join(" ", arguments)}");
 
-        var exitCode = await ProcessRunner.RunAsync(
+        var exitCode = await _processRunner.RunAsync(
                 _settings.DotNetExecutablePath,
                 arguments,
                 workingDirectory,
@@ -140,9 +147,18 @@ internal sealed class RepositoryVerificationRunner
     }
 }
 
-internal static class ProcessRunner
+internal interface IProcessRunner
 {
-    public static async Task<int> RunAsync(
+    Task<int> RunAsync(
+        string fileName,
+        IReadOnlyCollection<string> arguments,
+        string workingDirectory,
+        CancellationToken cancellationToken);
+}
+
+internal sealed class ProcessRunner : IProcessRunner
+{
+    public async Task<int> RunAsync(
         string fileName,
         IReadOnlyCollection<string> arguments,
         string workingDirectory,
@@ -163,7 +179,42 @@ internal static class ProcessRunner
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException($"Failed to start process '{fileName}'.");
 
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        return process.ExitCode;
+        using var cancellationRegistration = cancellationToken.Register(static state =>
+        {
+            if (state is Process runningProcess)
+            {
+                try
+                {
+                    if (!runningProcess.HasExited)
+                    {
+                        runningProcess.Kill(entireProcessTree: true);
+                    }
+                }
+                catch
+                {
+                }
+            }
+        }, process);
+
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            return process.ExitCode;
+        }
+        catch (OperationCanceledException)
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+            catch
+            {
+            }
+
+            throw;
+        }
     }
 }

@@ -1,8 +1,7 @@
 using System;
-using System.Collections.Concurrent;
+using System.Buffers;
 using System.Diagnostics;
 using System.Globalization;
-using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -49,7 +48,7 @@ internal sealed class StressRunner
             return failedResult;
         }
 
-        var results = new ConcurrentBag<StressRequestResult>();
+        var results = new List<StressRequestResult>();
 
         if (!_settings.SkipMcpCatalog)
         {
@@ -133,15 +132,13 @@ internal sealed class StressRunner
             await RunMcpDefaultToolCoverageAsync(results, cancellationToken).ConfigureAwait(false);
         }
 
-        var orderedResults = results
-            .OrderBy(static item => item.Workload, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(static item => item.Index)
-            .ToList();
+        var orderedResults = results.ToArray();
+        Array.Sort(orderedResults, StressRequestResultComparer.Instance);
 
         var summaries = StressSummaryCalculator.Calculate(orderedResults);
         _reporter.WriteCombinedSummary(summaries);
 
-        var totalFailures = orderedResults.Count(static item => !item.Success);
+        var totalFailures = CountFailures(orderedResults);
         var runResult = new StressRunResult(runId, reportDirectory, orderedResults, summaries, totalFailures);
         await StressReportWriter.WriteAsync(runResult, cancellationToken).ConfigureAwait(false);
 
@@ -199,7 +196,7 @@ internal sealed class StressRunner
         int totalRequests,
         int concurrency,
         Func<int, CancellationToken, Task<StressRequestResult>> operation,
-        ConcurrentBag<StressRequestResult> results,
+        List<StressRequestResult> results,
         CancellationToken cancellationToken)
     {
         if (totalRequests <= 0)
@@ -210,36 +207,64 @@ internal sealed class StressRunner
 
         _reporter.WriteWorkloadHeader(workload, totalRequests, concurrency);
 
-        using var throttler = new SemaphoreSlim(concurrency, concurrency);
-        var tasks = new List<Task>(totalRequests);
+        var workerCount = concurrency < 1 ? 1 : Math.Min(concurrency, totalRequests);
+        var workerResults = ArrayPool<StressRequestResult>.Shared.Rent(totalRequests);
+        var workers = new Task[workerCount];
+        var nextIndex = 0;
 
-        for (var index = 1; index <= totalRequests; index++)
+        try
         {
-            var capturedIndex = index;
-            tasks.Add(Task.Run(async () =>
+            for (var workerIndex = 0; workerIndex < workerCount; workerIndex++)
             {
-                await throttler.WaitAsync(cancellationToken).ConfigureAwait(false);
-                try
+                workers[workerIndex] = RunWorkerAsync(operation, cancellationToken);
+            }
+
+            await Task.WhenAll(workers).ConfigureAwait(false);
+
+            var workloadResults = new List<StressRequestResult>(totalRequests);
+            for (var index = 0; index < totalRequests; index++)
+            {
+                var result = workerResults[index];
+                if (result is null)
                 {
-                    var result = await operation(capturedIndex, cancellationToken).ConfigureAwait(false);
-                    results.Add(result);
+                    throw new InvalidOperationException($"Workload '{workload}' did not populate result {index + 1}.");
                 }
-                finally
-                {
-                    throttler.Release();
-                }
-            }, cancellationToken));
+
+                workloadResults.Add(result);
+            }
+
+            results.AddRange(workloadResults);
+
+            var summaries = StressSummaryCalculator.Calculate(workloadResults);
+            if (summaries.Count != 1)
+            {
+                throw new InvalidOperationException($"Workload '{workload}' produced an unexpected summary count.");
+            }
+
+            _reporter.WriteWorkloadSummary(workload, summaries[0]);
+            _reporter.WriteFailedResults(workloadResults);
+        }
+        finally
+        {
+            ArrayPool<StressRequestResult>.Shared.Return(workerResults, clearArray: true);
         }
 
-        await Task.WhenAll(tasks).ConfigureAwait(false);
+        async Task RunWorkerAsync(
+            Func<int, CancellationToken, Task<StressRequestResult>> workerOperation,
+            CancellationToken workerCancellationToken)
+        {
+            while (true)
+            {
+                var current = Interlocked.Increment(ref nextIndex);
+                if (current > totalRequests)
+                {
+                    break;
+                }
 
-        var workloadResults = results
-            .Where(item => string.Equals(item.Workload, workload, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(static item => item.Index)
-            .ToList();
-
-        _reporter.WriteWorkloadSummary(workload, StressSummaryCalculator.Calculate(workloadResults).Single());
-        _reporter.WriteFailedResults(workloadResults);
+                var result = await workerOperation(current, workerCancellationToken).ConfigureAwait(false);
+                workerResults[current - 1] = result;
+            }
+        }
     }
 
     private async Task<StressRequestResult> InvokeChatCompletionAsync(int index, CancellationToken cancellationToken)
@@ -351,7 +376,7 @@ internal sealed class StressRunner
     }
 
     private async Task RunMcpDefaultToolCoverageAsync(
-        ConcurrentBag<StressRequestResult> results,
+        List<StressRequestResult> results,
         CancellationToken cancellationToken)
     {
         _defaultMcpWorkspaceRoot = null;
@@ -366,9 +391,13 @@ internal sealed class StressRunner
             results.Add(result);
         }
 
-        _reporter.WriteWorkloadSummary(
-            DefaultMcpToolCoverageWorkload,
-            StressSummaryCalculator.Calculate(workloadResults).Single());
+        var summaries = StressSummaryCalculator.Calculate(workloadResults);
+        if (summaries.Count != 1)
+        {
+            throw new InvalidOperationException("Default MCP tool coverage produced an unexpected summary count.");
+        }
+
+        _reporter.WriteWorkloadSummary(DefaultMcpToolCoverageWorkload, summaries[0]);
         _reporter.WriteFailedResults(workloadResults);
     }
 
@@ -575,6 +604,20 @@ internal sealed class StressRunner
             : Path.Combine(Directory.GetCurrentDirectory(), reportRootPath);
 
         return Path.Combine(Path.GetFullPath(root), runId);
+    }
+
+    private static int CountFailures(IReadOnlyList<StressRequestResult> results)
+    {
+        var failures = 0;
+        for (var index = 0; index < results.Count; index++)
+        {
+            if (!results[index].Success)
+            {
+                failures++;
+            }
+        }
+
+        return failures;
     }
 
     private sealed record McpDefaultToolCoverageCase(

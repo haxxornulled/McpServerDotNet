@@ -24,7 +24,8 @@ public static class VaultCli
         }
 
         var command = args[0].Trim().ToLowerInvariant();
-        var options = VaultCommandLineOptions.Parse(args.Skip(1).ToArray());
+        var options = VaultCommandLineOptions.Parse(VaultCliArgumentHelpers.SliceArguments(args, 1));
+        VaultCliOutput.Configure(options.Value("output"));
 
         try
         {
@@ -57,14 +58,45 @@ public static class VaultCli
 
         if (entries.Count is 0)
         {
-            Console.WriteLine("No SSH vault entries found.");
+            if (VaultCliOutput.IsJson)
+            {
+                WriteJson(new
+                {
+                    command = "list",
+                    entries = Array.Empty<object>()
+                });
+            }
+            else
+            {
+                WriteText("No SSH vault entries found.");
+            }
+            return 0;
+        }
+
+        if (VaultCliOutput.IsJson)
+        {
+            var payload = new object[entries.Count];
+            for (var index = 0; index < entries.Count; index++)
+            {
+                payload[index] = new
+                {
+                    name = entries[index].Name,
+                    description = entries[index].Description
+                };
+            }
+
+            WriteJson(new
+            {
+                command = "list",
+                entries = payload
+            });
             return 0;
         }
 
         foreach (var entry in entries)
         {
             var description = string.IsNullOrWhiteSpace(entry.Description) ? string.Empty : $" - {entry.Description}";
-            Console.WriteLine($"{entry.Name}{description}");
+            WriteText($"{entry.Name}{description}");
         }
 
         return 0;
@@ -72,7 +104,7 @@ public static class VaultCli
 
     private static int RunAdd(VaultCommandLineOptions options)
     {
-        var name = options.RequiredValue("name", options.Positionals.FirstOrDefault());
+        var name = options.RequiredValue("name", options.GetPositionalOrNull(0));
         var secret = options.Value("secret");
         if (string.IsNullOrWhiteSpace(secret))
         {
@@ -83,28 +115,53 @@ public static class VaultCli
 
         var store = CreateStore(options);
         var entry = store.UpsertEntry(name, secret, options.Value("description"));
-        Console.WriteLine($"Saved SSH vault item '{entry.Name}'.");
+        if (VaultCliOutput.IsJson)
+        {
+            WriteJson(new
+            {
+                command = "add",
+                name = entry.Name,
+                description = entry.Description,
+                status = "saved"
+            });
+        }
+        else
+        {
+            WriteText($"Saved SSH vault item '{entry.Name}'.");
+        }
         return 0;
     }
 
     private static int RunDelete(VaultCommandLineOptions options)
     {
-        var name = options.RequiredValue("name", options.Positionals.FirstOrDefault());
+        var name = options.RequiredValue("name", options.GetPositionalOrNull(0));
         var store = CreateStore(options);
         var deleted = store.DeleteEntry(name);
         if (!deleted)
         {
-            Console.Error.WriteLine($"No SSH vault item named '{name}' was found.");
+            WriteError($"No SSH vault item named '{name}' was found.");
             return 1;
         }
 
-        Console.WriteLine($"Deleted SSH vault item '{name}'.");
+        if (VaultCliOutput.IsJson)
+        {
+            WriteJson(new
+            {
+                command = "delete",
+                name,
+                status = "deleted"
+            });
+        }
+        else
+        {
+            WriteText($"Deleted SSH vault item '{name}'.");
+        }
         return 0;
     }
 
     private static int RunVerify(VaultCommandLineOptions options)
     {
-        var name = options.RequiredValue("name", options.Positionals.FirstOrDefault());
+        var name = options.RequiredValue("name", options.GetPositionalOrNull(0));
         var store = CreateStore(options);
         var decrypted = store.ResolveSecret(name);
         var expected = options.Value("expected")
@@ -114,17 +171,29 @@ public static class VaultCli
 
         if (!string.Equals(decrypted, expected, StringComparison.Ordinal))
         {
-            Console.Error.WriteLine($"SSH vault item '{name}' did not match the expected secret.");
+            WriteError($"SSH vault item '{name}' did not match the expected secret.");
             return 1;
         }
 
-        Console.WriteLine($"Verified SSH vault item '{name}'.");
+        if (VaultCliOutput.IsJson)
+        {
+            WriteJson(new
+            {
+                command = "verify",
+                name,
+                verified = true
+            });
+        }
+        else
+        {
+            WriteText($"Verified SSH vault item '{name}'.");
+        }
         return 0;
     }
 
     private static int RunProfile(VaultCommandLineOptions options, IServiceProvider services)
     {
-        var subcommand = options.Positionals.FirstOrDefault();
+        var subcommand = options.GetPositionalOrNull(0);
         if (string.IsNullOrWhiteSpace(subcommand))
         {
             WriteProfileHelp();
@@ -152,13 +221,34 @@ public static class VaultCli
 
         if (profiles.Count is 0)
         {
-            Console.WriteLine("No SSH profiles found.");
+            if (VaultCliOutput.IsJson)
+            {
+                WriteJson(new
+                {
+                    command = "profile list",
+                    profiles = Array.Empty<object>()
+                });
+            }
+            else
+            {
+                WriteText("No SSH profiles found.");
+            }
+            return 0;
+        }
+
+        if (VaultCliOutput.IsJson)
+        {
+            WriteJson(new
+            {
+                command = "profile list",
+                profiles
+            });
             return 0;
         }
 
         foreach (var profile in profiles)
         {
-            Console.WriteLine(FormatProfileSummary(profile));
+            WriteText(FormatProfileSummary(profile));
         }
 
         return 0;
@@ -166,26 +256,37 @@ public static class VaultCli
 
     private static int RunProfileShow(VaultCommandLineOptions options, IServiceProvider services)
     {
-        var name = options.RequiredValue("name", options.Positionals.Skip(1).FirstOrDefault());
+        var name = options.RequiredValue("name", options.GetPositionalOrNull(1));
         var manager = services.GetRequiredService<SshProfileManager>();
         var baseDirectory = ResolveBaseDirectory(options);
         var profile = manager.GetProfile(baseDirectory, name, options.Value("profiles-path"));
         if (profile is null)
         {
-            Console.Error.WriteLine($"No SSH profile named '{name}' was found.");
+            WriteError($"No SSH profile named '{name}' was found.");
             return 1;
         }
 
-        Console.WriteLine(JsonSerializer.Serialize(profile, new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        if (VaultCliOutput.IsJson)
         {
-            WriteIndented = true
-        }));
+            WriteJson(new
+            {
+                command = "profile show",
+                profile
+            });
+        }
+        else
+        {
+            Console.WriteLine(JsonSerializer.Serialize(profile, new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                WriteIndented = true
+            }));
+        }
         return 0;
     }
 
     private static int RunProfileUpsert(VaultCommandLineOptions options, IServiceProvider services)
     {
-        var name = options.RequiredValue("name", options.Positionals.Skip(1).FirstOrDefault());
+        var name = options.RequiredValue("name", options.GetPositionalOrNull(1));
         var manager = services.GetRequiredService<SshProfileManager>();
         var baseDirectory = ResolveBaseDirectory(options);
         var profilesPath = options.Value("profiles-path");
@@ -193,29 +294,53 @@ public static class VaultCli
         var profile = BuildProfile(name, options, existing);
         var saved = manager.UpsertProfile(baseDirectory, profile, profilesPath);
 
-        Console.WriteLine($"Saved SSH profile '{saved.Name}' for {saved.Username}@{saved.Host}.");
+        if (VaultCliOutput.IsJson)
+        {
+            WriteJson(new
+            {
+                command = "profile upsert",
+                profile = saved,
+                status = "saved"
+            });
+        }
+        else
+        {
+            WriteText($"Saved SSH profile '{saved.Name}' for {saved.Username}@{saved.Host}.");
+        }
         return 0;
     }
 
     private static int RunProfileDelete(VaultCommandLineOptions options, IServiceProvider services)
     {
-        var name = options.RequiredValue("name", options.Positionals.Skip(1).FirstOrDefault());
+        var name = options.RequiredValue("name", options.GetPositionalOrNull(1));
         var manager = services.GetRequiredService<SshProfileManager>();
         var baseDirectory = ResolveBaseDirectory(options);
         var deleted = manager.DeleteProfile(baseDirectory, name, options.Value("profiles-path"));
         if (!deleted)
         {
-            Console.Error.WriteLine($"No SSH profile named '{name}' was found.");
+            WriteError($"No SSH profile named '{name}' was found.");
             return 1;
         }
 
-        Console.WriteLine($"Deleted SSH profile '{name}'.");
+        if (VaultCliOutput.IsJson)
+        {
+            WriteJson(new
+            {
+                command = "profile delete",
+                name,
+                status = "deleted"
+            });
+        }
+        else
+        {
+            WriteText($"Deleted SSH profile '{name}'.");
+        }
         return 0;
     }
 
     private static int RunProfileLink(VaultCommandLineOptions options, IServiceProvider services)
     {
-        var name = options.RequiredValue("name", options.Positionals.Skip(1).FirstOrDefault());
+        var name = options.RequiredValue("name", options.GetPositionalOrNull(1));
         var manager = services.GetRequiredService<SshProfileManager>();
         var baseDirectory = ResolveBaseDirectory(options);
         var updated = manager.LinkCredential(
@@ -225,18 +350,42 @@ public static class VaultCli
             options.Value("password-vault-item"),
             options.Value("private-key-passphrase-vault-item"));
 
-        Console.WriteLine($"Linked credentials for SSH profile '{updated.Name}'.");
+        if (VaultCliOutput.IsJson)
+        {
+            WriteJson(new
+            {
+                command = "profile link",
+                profile = updated,
+                status = "linked"
+            });
+        }
+        else
+        {
+            WriteText($"Linked credentials for SSH profile '{updated.Name}'.");
+        }
         return 0;
     }
 
     private static int RunProfileUnlink(VaultCommandLineOptions options, IServiceProvider services)
     {
-        var name = options.RequiredValue("name", options.Positionals.Skip(1).FirstOrDefault());
+        var name = options.RequiredValue("name", options.GetPositionalOrNull(1));
         var manager = services.GetRequiredService<SshProfileManager>();
         var baseDirectory = ResolveBaseDirectory(options);
         var updated = manager.UnlinkCredential(baseDirectory, name, options.Value("profiles-path"));
 
-        Console.WriteLine($"Unlinked credentials for SSH profile '{updated.Name}'.");
+        if (VaultCliOutput.IsJson)
+        {
+            WriteJson(new
+            {
+                command = "profile unlink",
+                profile = updated,
+                status = "unlinked"
+            });
+        }
+        else
+        {
+            WriteText($"Unlinked credentials for SSH profile '{updated.Name}'.");
+        }
         return 0;
     }
 
@@ -338,10 +487,20 @@ public static class VaultCli
             return null;
         }
 
-        return value
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(static item => !string.IsNullOrWhiteSpace(item))
-            .ToArray();
+        var items = value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var results = new List<string>(items.Length);
+        for (var index = 0; index < items.Length; index++)
+        {
+            var item = items[index].Trim();
+            if (item.Length == 0)
+            {
+                continue;
+            }
+
+            results.Add(item);
+        }
+
+        return results;
     }
 
     private static SshCredentialVaultStore CreateStore(VaultCommandLineOptions options)
@@ -408,6 +567,27 @@ public static class VaultCli
         return secret.TrimEnd('\r', '\n');
     }
 
+    private static void WriteText(string message)
+    {
+        if (!VaultCliOutput.IsJson)
+        {
+            Console.WriteLine(message);
+        }
+    }
+
+    private static void WriteError(string message)
+    {
+        Console.Error.WriteLine(message);
+    }
+
+    private static void WriteJson(object value)
+    {
+        Console.WriteLine(JsonSerializer.Serialize(value, new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            WriteIndented = true
+        }));
+    }
+
     private static bool IsHelp(string value)
     {
         return string.Equals(value, "help", StringComparison.OrdinalIgnoreCase)
@@ -442,20 +622,21 @@ public static class VaultCli
 SSH vault and profile CLI
 
 Usage:
-  add <name> [--secret value] [--secret-file path] [--description text] [--vault-path path] [--vault-key-path path] [--base-directory path]
-  verify <name> [--expected value] [--expected-file path] [--vault-path path] [--vault-key-path path] [--base-directory path]
-  delete <name> [--vault-path path] [--vault-key-path path] [--base-directory path]
-  list [--vault-path path] [--vault-key-path path] [--base-directory path]
+  add <name> [--secret value] [--secret-file path] [--description text] [--vault-path path] [--vault-key-path path] [--base-directory path] [--output text|json]
+  verify <name> [--expected value] [--expected-file path] [--vault-path path] [--vault-key-path path] [--base-directory path] [--output text|json]
+  delete <name> [--vault-path path] [--vault-key-path path] [--base-directory path] [--output text|json]
+  list [--vault-path path] [--vault-key-path path] [--base-directory path] [--output text|json]
   profile help
-  profile list [--profiles-path path] [--base-directory path]
-  profile show <name> [--profiles-path path] [--base-directory path]
-  profile upsert <name> --host host --username user [--port n] [--password-vault-item name] [--private-key-path path] [--private-key-passphrase-vault-item name] [--working-directory path] [--host-key-sha256 value] [--accept-unknown-host-key true|false] [--allow-sudo-command true|false] [--allow-all-commands true|false] [--allowed-commands csv] [--denied-commands csv] [--allowed-path-prefixes csv] [--profiles-path path] [--base-directory path]
-  profile link <name> [--password-vault-item name] [--private-key-passphrase-vault-item name] [--profiles-path path] [--base-directory path]
-  profile unlink <name> [--profiles-path path] [--base-directory path]
-  profile delete <name> [--profiles-path path] [--base-directory path]
+  profile list [--profiles-path path] [--base-directory path] [--output text|json]
+  profile show <name> [--profiles-path path] [--base-directory path] [--output text|json]
+  profile upsert <name> --host host --username user [--port n] [--password-vault-item name] [--private-key-path path] [--private-key-passphrase-vault-item name] [--working-directory path] [--host-key-sha256 value] [--accept-unknown-host-key true|false] [--allow-sudo-command true|false] [--allow-all-commands true|false] [--allowed-commands csv] [--denied-commands csv] [--allowed-path-prefixes csv] [--profiles-path path] [--base-directory path] [--output text|json]
+  profile link <name> [--password-vault-item name] [--private-key-passphrase-vault-item name] [--profiles-path path] [--base-directory path] [--output text|json]
+  profile unlink <name> [--profiles-path path] [--base-directory path] [--output text|json]
+  profile delete <name> [--profiles-path path] [--base-directory path] [--output text|json]
 
 Options:
   --name             Explicit item name. Optional if you pass the name positionally.
+  --output           Output mode: text or json. Default text.
   --secret           Plaintext secret to encrypt and store.
   --secret-file      Read the plaintext secret from a file.
   --expected         Plaintext secret to compare against during verify.
@@ -476,7 +657,7 @@ SSH profile commands
 Usage:
   profile list [--profiles-path path] [--base-directory path]
   profile show <name> [--profiles-path path] [--base-directory path]
-  profile upsert <name> --host host --username user [--port n] [--password-vault-item name] [--private-key-path path] [--private-key-passphrase-vault-item name] [--working-directory path] [--host-key-sha256 value] [--accept-unknown-host-key true|false] [--allow-sudo-command true|false] [--allow-all-commands true|false] [--allowed-commands csv] [--denied-commands csv] [--allowed-path-prefixes csv] [--profiles-path path] [--base-directory path]
+  profile upsert <name> --host host --username user [--port n] [--password-vault-item name] [--private-key-path path] [--private-key-passphrase-vault-item name] [--working-directory path] [--host-key-sha256 value] [--accept-unknown-host-key true|false] [--allow-sudo-command true|false] [--allow-all-commands true|false] [--allowed-commands csv] [--denied-commands csv] [--allowed-path-prefixes csv] [--profiles-path path] [--base-directory path] [--output text|json]
   profile delete <name> [--profiles-path path] [--base-directory path]
 """);
     }
@@ -489,6 +670,11 @@ internal sealed class VaultCommandLineOptions
     public IReadOnlyList<string> Positionals { get; private set; } = Array.Empty<string>();
 
     public string? Value(string key) => _values.TryGetValue(key, out var value) ? value : null;
+
+    public string? GetPositionalOrNull(int index)
+    {
+        return index >= 0 && index < Positionals.Count ? Positionals[index] : null;
+    }
 
     public string RequiredValue(string key, string? fallback = null)
     {
@@ -523,4 +709,36 @@ internal sealed class VaultCommandLineOptions
         options.Positionals = positionals;
         return options;
     }
+}
+
+internal static class VaultCliArgumentHelpers
+{
+    public static string[] SliceArguments(string[] args, int startIndex)
+    {
+        if (startIndex <= 0)
+        {
+            return args;
+        }
+
+        if (startIndex >= args.Length)
+        {
+            return Array.Empty<string>();
+        }
+
+        var slice = new string[args.Length - startIndex];
+        Array.Copy(args, startIndex, slice, 0, slice.Length);
+        return slice;
+    }
+}
+
+internal static class VaultCliOutput
+{
+    private static bool _json;
+
+    public static void Configure(string? outputMode)
+    {
+        _json = string.Equals(outputMode, "json", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool IsJson => _json;
 }

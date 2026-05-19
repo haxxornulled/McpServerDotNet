@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Text.Json;
@@ -38,9 +37,20 @@ internal sealed class LocalMcpClientConfigSettings
 
         var allowedModels = options
             .GetString("allowed-models", "qwen3-coder:30b,qwen2.5-coder:14b,devstral-small-2")
-            .Split(new[] { ',', ';', '|' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+            .Split(new[] { ',', ';', '|' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        var normalizedAllowedModels = new List<string>(allowedModels.Length);
+        var seenAllowedModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < allowedModels.Length; index++)
+        {
+            var model = allowedModels[index].Trim();
+            if (model.Length == 0 || !seenAllowedModels.Add(model))
+            {
+                continue;
+            }
+
+            normalizedAllowedModels.Add(model);
+        }
 
         return new LocalMcpClientConfigSettings
         {
@@ -48,9 +58,9 @@ internal sealed class LocalMcpClientConfigSettings
             BuildSolution = options.HasFlag("build"),
             SolutionPath = options.GetString("solution", "McpServer.slnx"),
             DefaultModel = options.GetString("default-model", "qwen3-coder:30b"),
-            AllowedModels = allowedModels.Length == 0
+            AllowedModels = normalizedAllowedModels.Count == 0
                 ? new[] { "qwen3-coder:30b", "qwen2.5-coder:14b", "devstral-small-2" }
-                : allowedModels,
+                : normalizedAllowedModels,
             OllamaBaseUrl = options.GetString("ollama-base-url", "http://127.0.0.1:11434"),
             ContextLength = options.GetInt("context-length", 131072),
             NumPredict = options.GetInt("num-predict", 32000),
@@ -64,10 +74,17 @@ internal sealed class LocalMcpClientConfigSettings
 internal sealed class LocalMcpClientConfigRunner
 {
     private readonly LocalMcpClientConfigSettings _settings;
+    private readonly IProcessRunner _processRunner;
 
     public LocalMcpClientConfigRunner(LocalMcpClientConfigSettings settings)
+        : this(settings, new ProcessRunner())
+    {
+    }
+
+    public LocalMcpClientConfigRunner(LocalMcpClientConfigSettings settings, IProcessRunner processRunner)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _processRunner = processRunner ?? throw new ArgumentNullException(nameof(processRunner));
     }
 
     public async Task<int> RunAsync(CancellationToken cancellationToken)
@@ -86,7 +103,7 @@ internal sealed class LocalMcpClientConfigRunner
 
         if (_settings.BuildSolution)
         {
-            if (await ProcessRunner.RunAsync(
+            if (await _processRunner.RunAsync(
                     "dotnet",
                     new[]
                     {

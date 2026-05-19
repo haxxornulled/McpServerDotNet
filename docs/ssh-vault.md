@@ -79,6 +79,8 @@ cmd.exe /c "set MCPSERVER_INTEGRATION_LIVE_SSH=1&& dotnet test .\tests\McpServer
 
 If you rotate the password later, repeat `vault add root` and then `profile link root --password-vault-item root`.
 
+All vault and profile commands also support `--output json` when you want machine-readable results for an extension or script.
+
 ## CLI reference
 
 The vault CLI is:

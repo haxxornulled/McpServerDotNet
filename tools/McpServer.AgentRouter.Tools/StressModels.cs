@@ -1,7 +1,7 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -108,57 +108,151 @@ internal static class StressSummaryCalculator
 {
     public static IReadOnlyList<StressWorkloadSummary> Calculate(IReadOnlyList<StressRequestResult> results)
     {
-        return results
-            .GroupBy(static item => item.Workload, StringComparer.OrdinalIgnoreCase)
-            .OrderBy(static group => group.Key, StringComparer.OrdinalIgnoreCase)
-            .Select(CreateSummary)
-            .ToList();
+        if (results.Count == 0)
+        {
+            return Array.Empty<StressWorkloadSummary>();
+        }
+
+        var accumulators = new Dictionary<string, WorkloadAccumulator>(StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < results.Count; index++)
+        {
+            var result = results[index];
+            if (!accumulators.TryGetValue(result.Workload, out var accumulator))
+            {
+                accumulator = new WorkloadAccumulator();
+                accumulators.Add(result.Workload, accumulator);
+            }
+
+            accumulator.Add(result.ElapsedMilliseconds, result.Success);
+        }
+
+        var workloadNames = ArrayPool<string>.Shared.Rent(accumulators.Count);
+        var workloadIndex = 0;
+        foreach (var workloadName in accumulators.Keys)
+        {
+            workloadNames[workloadIndex++] = workloadName;
+        }
+
+        Array.Sort(workloadNames, 0, workloadIndex, StringComparer.OrdinalIgnoreCase);
+
+        var summaries = new StressWorkloadSummary[workloadIndex];
+        try
+        {
+            for (var index = 0; index < workloadIndex; index++)
+            {
+                var workloadName = workloadNames[index];
+                summaries[index] = accumulators[workloadName].ToSummary(workloadName);
+            }
+
+            return summaries;
+        }
+        finally
+        {
+            foreach (var accumulator in accumulators.Values)
+            {
+                accumulator.Dispose();
+            }
+
+            ArrayPool<string>.Shared.Return(workloadNames, clearArray: true);
+        }
     }
 
-    private static StressWorkloadSummary CreateSummary(IGrouping<string, StressRequestResult> group)
+    private sealed class WorkloadAccumulator : IDisposable
     {
-        var values = group.Select(static item => (double)item.ElapsedMilliseconds).Order().ToArray();
-        var successes = group.Count(static item => item.Success);
-        var failures = group.Count(static item => !item.Success);
+        private double[] _elapsedValues = ArrayPool<double>.Shared.Rent(16);
+        private int _count;
+        private int _success;
+        private int _failed;
 
-        return new StressWorkloadSummary
+        public void Add(long elapsedMilliseconds, bool success)
         {
-            Workload = group.Key,
-            Total = group.Count(),
-            Success = successes,
-            Failed = failures,
-            MinMs = values.Length == 0 ? 0 : Math.Round(values[0], 2),
-            AvgMs = values.Length == 0 ? 0 : Math.Round(values.Average(), 2),
-            P50Ms = Percentile(values, 50),
-            P95Ms = Percentile(values, 95),
-            MaxMs = values.Length == 0 ? 0 : Math.Round(values[^1], 2)
-        };
-    }
+            if (_count == _elapsedValues.Length)
+            {
+                Grow();
+            }
 
-    private static double Percentile(IReadOnlyList<double> sortedValues, double percentile)
-    {
-        if (sortedValues.Count == 0)
-        {
-            return 0;
+            _elapsedValues[_count++] = elapsedMilliseconds;
+
+            if (success)
+            {
+                _success++;
+            }
+            else
+            {
+                _failed++;
+            }
         }
 
-        if (sortedValues.Count == 1)
+        public StressWorkloadSummary ToSummary(string workload)
         {
-            return Math.Round(sortedValues[0], 2);
+            if (_count == 0)
+            {
+                return new StressWorkloadSummary
+                {
+                    Workload = workload
+                };
+            }
+
+            Array.Sort(_elapsedValues, 0, _count);
+
+            double total = 0;
+            for (var index = 0; index < _count; index++)
+            {
+                total += _elapsedValues[index];
+            }
+
+            return new StressWorkloadSummary
+            {
+                Workload = workload,
+                Total = _count,
+                Success = _success,
+                Failed = _failed,
+                MinMs = Math.Round(_elapsedValues[0], 2),
+                AvgMs = Math.Round(total / _count, 2),
+                P50Ms = Percentile(_elapsedValues, _count, 50),
+                P95Ms = Percentile(_elapsedValues, _count, 95),
+                MaxMs = Math.Round(_elapsedValues[_count - 1], 2)
+            };
         }
 
-        var rank = (percentile / 100.0d) * (sortedValues.Count - 1);
-        var lower = (int)Math.Floor(rank);
-        var upper = (int)Math.Ceiling(rank);
-
-        if (lower == upper)
+        public void Dispose()
         {
-            return Math.Round(sortedValues[lower], 2);
+            ArrayPool<double>.Shared.Return(_elapsedValues, clearArray: true);
         }
 
-        var weight = rank - lower;
-        var value = (sortedValues[lower] * (1.0d - weight)) + (sortedValues[upper] * weight);
-        return Math.Round(value, 2);
+        private void Grow()
+        {
+            var next = ArrayPool<double>.Shared.Rent(_elapsedValues.Length * 2);
+            Array.Copy(_elapsedValues, next, _count);
+            ArrayPool<double>.Shared.Return(_elapsedValues, clearArray: true);
+            _elapsedValues = next;
+        }
+
+        private static double Percentile(double[] sortedValues, int count, double percentile)
+        {
+            if (count == 0)
+            {
+                return 0;
+            }
+
+            if (count == 1)
+            {
+                return Math.Round(sortedValues[0], 2);
+            }
+
+            var rank = (percentile / 100.0d) * (count - 1);
+            var lower = (int)Math.Floor(rank);
+            var upper = (int)Math.Ceiling(rank);
+
+            if (lower == upper)
+            {
+                return Math.Round(sortedValues[lower], 2);
+            }
+
+            var weight = rank - lower;
+            var value = (sortedValues[lower] * (1.0d - weight)) + (sortedValues[upper] * weight);
+            return Math.Round(value, 2);
+        }
     }
 }
 
@@ -242,6 +336,11 @@ internal sealed class ConsoleStressReporter
 
     public void WriteHeader(string stressRunId, StressSettings settings, string reportDirectory)
     {
+        if (CliOutput.IsJson)
+        {
+            return;
+        }
+
         ConsoleWriter.WriteSection("AgentRouter stress harness");
         Console.WriteLine($"StressRunId:        {stressRunId}");
         Console.WriteLine($"RouterBaseUrl:      {settings.RouterBaseUrl}");
@@ -260,6 +359,11 @@ internal sealed class ConsoleStressReporter
 
     public void WriteSection(string name)
     {
+        if (CliOutput.IsJson)
+        {
+            return;
+        }
+
         ConsoleWriter.WriteSection(name);
     }
 
@@ -280,6 +384,11 @@ internal sealed class ConsoleStressReporter
 
     public void WriteWorkloadHeader(string workload, int requests, int concurrency)
     {
+        if (CliOutput.IsJson)
+        {
+            return;
+        }
+
         ConsoleWriter.WriteSection($"{workload} workload");
         Console.WriteLine($"Requests:    {requests.ToString(CultureInfo.InvariantCulture)}");
         Console.WriteLine($"Concurrency: {concurrency.ToString(CultureInfo.InvariantCulture)}");
@@ -287,6 +396,11 @@ internal sealed class ConsoleStressReporter
 
     public void WriteWorkloadSummary(string workload, StressWorkloadSummary summary)
     {
+        if (CliOutput.IsJson)
+        {
+            return;
+        }
+
         Console.WriteLine($"Workload: {workload}");
         Console.WriteLine($"  Total:   {summary.Total.ToString(CultureInfo.InvariantCulture)}");
         Console.WriteLine($"  Success: {summary.Success.ToString(CultureInfo.InvariantCulture)}");
@@ -308,32 +422,64 @@ internal sealed class ConsoleStressReporter
 
     public void WriteFailedResults(IReadOnlyList<StressRequestResult> results)
     {
-        var failedResults = results
-            .Where(static item => !item.Success)
-            .OrderBy(static item => item.Index)
-            .ToList();
-
-        if (failedResults.Count == 0)
+        if (CliOutput.IsJson)
         {
             return;
         }
 
-        ConsoleWriter.WriteWarning("Failed request details:");
-
-        foreach (var result in failedResults)
+        var failedCount = 0;
+        for (var index = 0; index < results.Count; index++)
         {
-            Console.WriteLine(FormattableString.Invariant(
-                $"  #{result.Index} status={result.StatusCode} elapsedMs={result.ElapsedMilliseconds}"));
-
-            if (!string.IsNullOrWhiteSpace(result.Error))
+            if (!results[index].Success)
             {
-                Console.WriteLine($"    error: {TrimForConsole(result.Error)}");
+                failedCount++;
+            }
+        }
+
+        if (failedCount == 0)
+        {
+            return;
+        }
+
+        var failedResults = ArrayPool<StressRequestResult>.Shared.Rent(failedCount);
+        var failedIndex = 0;
+        try
+        {
+            for (var index = 0; index < results.Count; index++)
+            {
+                var result = results[index];
+                if (result.Success)
+                {
+                    continue;
+                }
+
+                failedResults[failedIndex++] = result;
             }
 
-            if (!string.IsNullOrWhiteSpace(result.ContentPreview))
+            Array.Sort(failedResults, 0, failedIndex, StressRequestResultComparer.Instance);
+
+            ConsoleWriter.WriteWarning("Failed request details:");
+
+            for (var index = 0; index < failedIndex; index++)
             {
-                Console.WriteLine($"    preview: {TrimForConsole(result.ContentPreview)}");
+                var result = failedResults[index];
+                Console.WriteLine(FormattableString.Invariant(
+                    $"  #{result.Index} status={result.StatusCode} elapsedMs={result.ElapsedMilliseconds}"));
+
+                if (!string.IsNullOrWhiteSpace(result.Error))
+                {
+                    Console.WriteLine($"    error: {TrimForConsole(result.Error)}");
+                }
+
+                if (!string.IsNullOrWhiteSpace(result.ContentPreview))
+                {
+                    Console.WriteLine($"    preview: {TrimForConsole(result.ContentPreview)}");
+                }
             }
+        }
+        finally
+        {
+            ArrayPool<StressRequestResult>.Shared.Return(failedResults, clearArray: true);
         }
     }
 
@@ -352,12 +498,18 @@ internal sealed class ConsoleStressReporter
 
     public void WriteCombinedSummary(IReadOnlyList<StressWorkloadSummary> summaries)
     {
+        if (CliOutput.IsJson)
+        {
+            return;
+        }
+
         ConsoleWriter.WriteSection("Combined summary");
         Console.WriteLine("Workload                  Total  Success  Failed  AvgMs  P50Ms  P95Ms  MaxMs");
         Console.WriteLine("--------                  -----  -------  ------  -----  -----  -----  -----");
 
-        foreach (var summary in summaries)
+        for (var index = 0; index < summaries.Count; index++)
         {
+            var summary = summaries[index];
             Console.WriteLine(
                 FormattableString.Invariant($"{summary.Workload,-24} {summary.Total,5}  {summary.Success,7}  {summary.Failed,6}  {summary.AvgMs,5}  {summary.P50Ms,5}  {summary.P95Ms,5}  {summary.MaxMs,5}"));
         }
@@ -365,6 +517,11 @@ internal sealed class ConsoleStressReporter
 
     public void WriteReportPaths(StressRunResult runResult)
     {
+        if (CliOutput.IsJson)
+        {
+            return;
+        }
+
         Console.WriteLine("Reports written:");
         Console.WriteLine($"  {Path.Combine(runResult.ReportDirectory, "results.json")}");
         Console.WriteLine($"  {Path.Combine(runResult.ReportDirectory, "summary.json")}");
@@ -373,6 +530,11 @@ internal sealed class ConsoleStressReporter
 
     public void WriteSshExecutionResponse(JsonNode? json)
     {
+        if (CliOutput.IsJson)
+        {
+            return;
+        }
+
         if (json is null)
         {
             return;
@@ -420,9 +582,45 @@ internal sealed class ConsoleStressReporter
             WriteIndented = true
         });
 
-        foreach (var line in formatted.Split('\n'))
+        var lines = formatted.Split('\n');
+        for (var index = 0; index < lines.Length; index++)
         {
-            Console.WriteLine($"  {line.TrimEnd('\r')}");
+            Console.WriteLine($"  {lines[index].TrimEnd('\r')}");
         }
+    }
+}
+
+internal sealed class StressRequestResultComparer : IComparer<StressRequestResult>
+{
+    public static readonly StressRequestResultComparer Instance = new();
+
+    private StressRequestResultComparer()
+    {
+    }
+
+    public int Compare(StressRequestResult? x, StressRequestResult? y)
+    {
+        if (ReferenceEquals(x, y))
+        {
+            return 0;
+        }
+
+        if (x is null)
+        {
+            return -1;
+        }
+
+        if (y is null)
+        {
+            return 1;
+        }
+
+        var workloadComparison = string.Compare(x.Workload, y.Workload, StringComparison.OrdinalIgnoreCase);
+        if (workloadComparison != 0)
+        {
+            return workloadComparison;
+        }
+
+        return x.Index.CompareTo(y.Index);
     }
 }
