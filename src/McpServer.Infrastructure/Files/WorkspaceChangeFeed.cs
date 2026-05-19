@@ -41,10 +41,15 @@ public sealed class WorkspaceChangeFeed : IWorkspaceChangeFeed
             return Array.Empty<WorkspaceChangeEntry>();
         }
 
-        return _entries
-            .Reverse()
-            .Take(maxEntries)
-            .Reverse()
-            .ToArray();
+        var snapshot = _entries.ToArray();
+        if (snapshot.Length <= maxEntries)
+        {
+            return snapshot;
+        }
+
+        var result = new WorkspaceChangeEntry[maxEntries];
+        var start = snapshot.Length - maxEntries;
+        Array.Copy(snapshot, start, result, 0, maxEntries);
+        return result;
     }
 }

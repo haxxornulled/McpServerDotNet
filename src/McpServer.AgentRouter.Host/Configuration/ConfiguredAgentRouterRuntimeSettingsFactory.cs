@@ -215,7 +215,8 @@ internal static class ConfiguredAgentRouterRuntimeSettingsFactory
             AllowedCommands = source.AllowedCommands.ToList(),
             DeniedCommands = source.DeniedCommands.ToList(),
             AllowedRemotePathPrefixes = source.AllowedRemotePathPrefixes.ToList(),
-            AllowSudoCommand = source.AllowSudoCommand
+            AllowSudoCommand = source.AllowSudoCommand,
+            AllowAllCommands = source.AllowAllCommands
         };
     }
 

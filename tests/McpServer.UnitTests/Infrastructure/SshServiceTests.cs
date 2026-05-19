@@ -125,6 +125,43 @@ public sealed class SshServiceTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_Should_Allow_Any_Command_When_Profile_Opts_In()
+    {
+        var logger = Substitute.For<ILogger<TestSshService>>();
+        var backendRoot = Path.Combine(Path.GetTempPath(), $"mcpserver-ssh-test-{Guid.NewGuid():N}");
+        var sut = new TestSshService(
+            [
+                new ConfiguredSshProfile(
+                    "lab",
+                    "127.0.0.1",
+                    22,
+                    "tester",
+                    PrivateKeyPath: null,
+                    PasswordVaultItemName: "lab",
+                    PrivateKeyPassphraseVaultItemName: null,
+                    WorkingDirectory: null,
+                    HostKeySha256: "SHA256:dGVzdA",
+                    AcceptUnknownHostKey: false,
+                    AllowedCommands: [],
+                    DeniedCommands: ["rm", "sudo"],
+                    AllowedRemotePathPrefixes: [],
+                    AllowSudoCommand: true,
+                    AllowAllCommands: true)
+            ],
+            backendRoot,
+            logger);
+
+        var result = await sut.ExecuteAsync(new("lab", "ps", Args: ["-aux"]), CancellationToken.None);
+
+        Assert.True(result.IsSucc);
+        var execution = result.Match(
+            Succ: value => value,
+            Fail: failure => throw new InvalidOperationException(failure.Message));
+        Assert.Equal("ps", execution.Command);
+        Assert.Contains("command=ps", execution.StandardOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_Should_Require_Command_Allowlist_Before_Attempting_Connection()
     {
         var logger = Substitute.For<ILogger<SshService>>();

@@ -1,7 +1,7 @@
 using LanguageExt;
 using LanguageExt.Common;
 using McpServer.Application.Abstractions.Files;
-using McpServer.Domain.Workspace;
+using McpServer.Application.Files.Results;
 
 namespace McpServer.Application.Files;
 
@@ -11,7 +11,7 @@ namespace McpServer.Application.Files;
 public sealed class WorkspaceMutationService(
     IPathPolicy pathPolicy,
     IResourcePathTranslator resourcePathTranslator,
-    IWorkspaceChangeFeed? changeFeed = null) : McpServer.Domain.Workspace.IWorkspaceMutationService
+    IWorkspaceChangeFeed? changeFeed = null) : IWorkspaceMutationService
 {
     public Fin<WorkspaceTransitionResult> OpenWorkspace(string workspaceRoot) =>
         TransitionWorkspaceRoot(workspaceRoot, "open_workspace");

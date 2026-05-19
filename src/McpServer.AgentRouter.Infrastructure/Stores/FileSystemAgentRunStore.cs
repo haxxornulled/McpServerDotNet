@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Collections.Concurrent;
 using LanguageExt;
 using LanguageExt.Common;
 using McpServer.AgentRouter.Application.Abstractions;
@@ -15,6 +16,7 @@ public sealed class FileSystemAgentRunStore : IAgentRunStore
     {
         WriteIndented = true
     };
+    private static readonly ConcurrentDictionary<string, object> Locks = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly AgentRouterRuntimeSettings _settings;
     private readonly IAgentRouterRuntimePathResolver _pathResolver;
@@ -30,7 +32,7 @@ public sealed class FileSystemAgentRunStore : IAgentRunStore
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async ValueTask SaveAsync(
+    public ValueTask SaveAsync(
         AgentRun run,
         AgentRunRequest? request,
         CancellationToken cancellationToken)
@@ -45,37 +47,38 @@ public sealed class FileSystemAgentRunStore : IAgentRunStore
 
         var rootPath = ResolveStorageRootPath();
         var runDirectory = ResolveRunDirectory(rootPath, run.Id);
-
-        Directory.CreateDirectory(runDirectory);
-
-        if (request is not null)
+        ExecuteLocked(runDirectory, () =>
         {
-            await WriteJsonFileAsync(
+            Directory.CreateDirectory(runDirectory);
+
+            if (request is not null)
+            {
+                WriteJsonFile(
                     Path.Combine(runDirectory, "request.json"),
-                    MapToRecord(request),
-                    cancellationToken)
-                .ConfigureAwait(false);
-        }
+                    MapToRecord(request));
+            }
 
-        await WriteJsonFileAsync(
+            WriteJsonFile(
                 Path.Combine(runDirectory, "response.json"),
-                MapToRecord(run),
-                cancellationToken)
-            .ConfigureAwait(false);
+                MapToRecord(run));
 
-        if (_settings.RunStorage.WriteArtifactFiles)
-        {
-            await WriteArtifactFilesAsync(run, runDirectory, cancellationToken)
-                .ConfigureAwait(false);
-        }
+            if (_settings.RunStorage.WriteArtifactFiles)
+            {
+                WriteArtifactFiles(run, runDirectory);
+            }
 
-        _logger.LogDebug(
-            "Persisted AgentRouter run {RunId} to {RunDirectory}.",
-            run.Id,
-            runDirectory);
+            _logger.LogDebug(
+                "Persisted AgentRouter run {RunId} to {RunDirectory}.",
+                run.Id,
+                runDirectory);
+
+            return 0;
+        });
+
+        return ValueTask.CompletedTask;
     }
 
-    public async ValueTask<Fin<AgentRun>> GetAsync(
+    public ValueTask<Fin<AgentRun>> GetAsync(
         string runId,
         CancellationToken cancellationToken)
     {
@@ -83,59 +86,57 @@ public sealed class FileSystemAgentRunStore : IAgentRunStore
 
         if (string.IsNullOrWhiteSpace(runId))
         {
-            return Error.New("run id is required.");
+            return ValueTask.FromResult<Fin<AgentRun>>(Error.New("run id is required."));
         }
 
         if (!IsSafePathSegment(runId.Trim()))
         {
-            return Error.New($"Agent run '{runId}' was not found.");
+            return ValueTask.FromResult<Fin<AgentRun>>(Error.New($"Agent run '{runId}' was not found."));
         }
 
         var rootPath = ResolveStorageRootPath();
         var runDirectory = ResolveRunDirectory(rootPath, runId.Trim());
-        var responsePath = Path.Combine(runDirectory, "response.json");
-
-        if (!File.Exists(responsePath))
+        return new ValueTask<Fin<AgentRun>>(ExecuteLocked(runDirectory, () =>
         {
-            return Error.New($"Agent run '{runId}' was not found.");
-        }
+            var responsePath = Path.Combine(runDirectory, "response.json");
 
-        try
-        {
-            await using var stream = File.OpenRead(responsePath);
-            var runRecord = await JsonSerializer.DeserializeAsync<AgentRunRecord>(
-                    stream,
-                    JsonOptions,
-                    cancellationToken)
-                .ConfigureAwait(false);
-
-            if (runRecord is null)
+            if (!File.Exists(responsePath))
             {
-                return Error.New($"Agent run '{runId}' could not be read.");
+                return Error.New($"Agent run '{runId}' was not found.");
             }
 
-            return Fin<AgentRun>.Succ(MapToDomain(runRecord));
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "Could not deserialize AgentRouter run {RunId} from {ResponsePath}.",
-                runId,
-                responsePath);
+            try
+            {
+                var json = File.ReadAllText(responsePath);
+                var runRecord = JsonSerializer.Deserialize<AgentRunRecord>(json, JsonOptions);
+                if (runRecord is null)
+                {
+                    return Error.New($"Agent run '{runId}' could not be read.");
+                }
 
-            return Error.New($"Agent run '{runId}' could not be read.");
-        }
-        catch (IOException ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "Could not read AgentRouter run {RunId} from {ResponsePath}.",
-                runId,
-                responsePath);
+                return Fin<AgentRun>.Succ(MapToDomain(runRecord));
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Could not deserialize AgentRouter run {RunId} from {ResponsePath}.",
+                    runId,
+                    responsePath);
 
-            return Error.New($"Agent run '{runId}' could not be read.");
-        }
+                return Error.New($"Agent run '{runId}' could not be read.");
+            }
+            catch (IOException ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Could not read AgentRouter run {RunId} from {ResponsePath}.",
+                    runId,
+                    responsePath);
+
+                return Error.New($"Agent run '{runId}' could not be read.");
+            }
+        }));
     }
 
     private string ResolveStorageRootPath()
@@ -172,39 +173,29 @@ public sealed class FileSystemAgentRunStore : IAgentRunStore
         return runDirectory;
     }
 
-    private static async Task WriteArtifactFilesAsync(
+    private static void WriteArtifactFiles(
         AgentRun run,
-        string runDirectory,
-        CancellationToken cancellationToken)
+        string runDirectory)
     {
         if (run.Artifacts.Count == 0)
         {
             return;
         }
 
-        await WriteJsonFileAsync(
-                Path.Combine(runDirectory, "artifacts.json"),
-                run.Artifacts.Select(MapToRecord).ToArray(),
-                cancellationToken)
-            .ConfigureAwait(false);
+        WriteJsonFile(
+            Path.Combine(runDirectory, "artifacts.json"),
+            run.Artifacts.Select(MapToRecord).ToArray());
 
         foreach (var artifact in run.Artifacts)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
             var artifactPath = Path.Combine(runDirectory, GetArtifactFileName(artifact));
             if (artifact.Type.Equals("trace", StringComparison.OrdinalIgnoreCase))
             {
-                await WriteJsonFileAsync(artifactPath, MapToRecord(artifact), cancellationToken)
-                    .ConfigureAwait(false);
+                WriteJsonFile(artifactPath, MapToRecord(artifact));
                 continue;
             }
 
-            await WriteTextFileAsync(
-                    artifactPath,
-                    artifact.Content,
-                    cancellationToken)
-                .ConfigureAwait(false);
+            WriteTextFile(artifactPath, artifact.Content);
         }
     }
 
@@ -239,13 +230,59 @@ public sealed class FileSystemAgentRunStore : IAgentRunStore
         return new string(chars).Trim('-', ' ', '.');
     }
 
-    private static async Task WriteJsonFileAsync<T>(
+    private static void WriteJsonFile<T>(
         string path,
-        T value,
-        CancellationToken cancellationToken)
+        T value)
     {
         var json = JsonSerializer.Serialize(value, JsonOptions);
-        await WriteTextFileAsync(path, json, cancellationToken).ConfigureAwait(false);
+        WriteTextFile(path, json);
+    }
+
+    private static void WriteTextFile(string path, string content)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        var tempPath = Path.Combine(directory ?? Path.GetTempPath(), Path.GetRandomFileName());
+        try
+        {
+            File.WriteAllText(tempPath, content);
+            File.Move(tempPath, path, true);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                try
+                {
+                    File.Delete(tempPath);
+                }
+                catch
+                {
+                }
+            }
+        }
+    }
+
+    private static T ExecuteLocked<T>(string runDirectory, Func<T> action)
+    {
+        var lockPath = runDirectory + ".lock";
+        var directory = Path.GetDirectoryName(lockPath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        var mutexKey = Path.GetFullPath(runDirectory);
+        var gate = Locks.GetOrAdd(mutexKey, static _ => new object());
+        lock (gate)
+        {
+            using var lockStream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            return action();
+        }
     }
 
     private static AgentRunRequestRecord MapToRecord(AgentRunRequest request)

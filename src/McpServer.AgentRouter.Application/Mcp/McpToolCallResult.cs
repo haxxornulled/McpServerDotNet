@@ -28,7 +28,7 @@ public sealed class McpToolCallResult
     /// <summary>
     /// Gets or sets the text content extracted from the result.
     /// </summary>
-    public IList<string> ContentText { get; set; } = new List<string>();
+    public IReadOnlyList<string> ContentText { get; set; } = Array.Empty<string>();
 
     /// <summary>
     /// Gets or sets the elapsed execution time in milliseconds.

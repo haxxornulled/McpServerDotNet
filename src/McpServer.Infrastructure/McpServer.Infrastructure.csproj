@@ -18,13 +18,6 @@
     <PackageReference Include="Serilog.Sinks.Async" />
     <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers" PrivateAssets="all" />
   </ItemGroup>
-
-    <ItemGroup>
-      <PackageReference Include="VapeCache.Abstractions" />
-      <PackageReference Include="VapeCache.Core" />
-      <PackageReference Include="VapeCache.Extensions.DependencyInjection" />
-    <PackageReference Include="VapeCache.Runtime" />
-    </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\McpServer.Application\McpServer.Application.csproj" />
     <ProjectReference Include="..\McpServer.Domain\McpServer.Domain.csproj" />

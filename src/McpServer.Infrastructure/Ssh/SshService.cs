@@ -59,14 +59,14 @@ public sealed class SshService(
             {
                 try
                 {
-                    var executionResult = await Task.Run(() =>
-                        ExecuteWithConnectionInfo(
+                    var executionResult = await ExecuteWithConnectionInfoAsync(
                             resolvedProfile,
                             attempt.ConnectionInfo,
                             command,
                             workingDirectory,
                             timeoutSeconds,
-                            maxOutputChars), ct).ConfigureAwait(false);
+                            maxOutputChars,
+                            ct).ConfigureAwait(false);
 
                     logger.LogInformation(
                         "Executed SSH command via profile {Profile} on {Host}:{Port} with exit code {ExitCode}",
@@ -127,11 +127,12 @@ public sealed class SshService(
             {
                 try
                 {
-                    var writeResult = await Task.Run(() =>
-                        WriteTextWithConnectionInfo(
+                    var writeResult = await WriteTextWithConnectionInfoAsync(
                             resolvedProfile,
                             attempt.ConnectionInfo,
-                            command), ct).ConfigureAwait(false);
+                            command,
+                            ct)
+                        .ConfigureAwait(false);
 
                     logger.LogInformation(
                         "Wrote remote file {Path} via SSH profile {Profile}",
@@ -221,7 +222,7 @@ public sealed class SshService(
                 : new PrivateKeyFile(privateKeyPath, passphrase);
 
             attempts.Add(new SshConnectionAttempt(
-                CreateConnectionInfo(profile, timeoutSeconds, [new PrivateKeyAuthenticationMethod(profile.Username, privateKeyFile)]),
+                CreateConnectionInfo(profile, timeoutSeconds, new[] { new PrivateKeyAuthenticationMethod(profile.Username, privateKeyFile) }),
                 "private-key"));
         }
 
@@ -235,10 +236,10 @@ public sealed class SshService(
 
             var password = ResolveRequiredVaultSecret(profile.PasswordVaultItemName, "password");
             attempts.Add(new SshConnectionAttempt(
-                CreateConnectionInfo(profile, timeoutSeconds, [CreateKeyboardInteractiveAuthenticationMethod(profile.Username, password)]),
+                CreateConnectionInfo(profile, timeoutSeconds, new[] { CreateKeyboardInteractiveAuthenticationMethod(profile.Username, password) }),
                 "keyboard-interactive"));
             attempts.Add(new SshConnectionAttempt(
-                CreateConnectionInfo(profile, timeoutSeconds, [CreatePasswordAuthenticationMethod(profile.Username, password)]),
+                CreateConnectionInfo(profile, timeoutSeconds, new[] { CreatePasswordAuthenticationMethod(profile.Username, password) }),
                 "password"));
         }
 
@@ -254,8 +255,8 @@ public sealed class SshService(
     private static ConnectionInfo CreateConnectionInfo(
         ConfiguredSshProfile profile,
         int timeoutSeconds,
-        IEnumerable<AuthenticationMethod> authMethods) =>
-        new(profile.Host, profile.Port, profile.Username, authMethods.ToArray())
+        AuthenticationMethod[] authMethods) =>
+        new(profile.Host, profile.Port, profile.Username, authMethods)
         {
             Timeout = TimeSpan.FromSeconds(timeoutSeconds)
         };
@@ -274,19 +275,20 @@ public sealed class SshService(
         return client;
     }
 
-    private SshCommandResult ExecuteWithConnectionInfo(
+    private async Task<SshCommandResult> ExecuteWithConnectionInfoAsync(
         ConfiguredSshProfile profile,
         ConnectionInfo connectionInfo,
         ExecuteSshCommand command,
         string workingDirectory,
         int timeoutSeconds,
-        int maxOutputChars)
+        int maxOutputChars,
+        CancellationToken ct)
     {
         using var client = CreateSshClient(connectionInfo, profile, out var hostKeyValidation);
         client.ConnectionInfo.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
         try
         {
-            client.Connect();
+            await client.ConnectAsync(ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (hostKeyValidation.WasRejected && ex is SshException)
         {
@@ -298,29 +300,19 @@ public sealed class SshService(
             using var sshCommand = client.CreateCommand(BuildRemoteCommand(command.Command, command.Args, workingDirectory));
             sshCommand.CommandTimeout = TimeSpan.FromSeconds(timeoutSeconds);
 
-            try
-            {
-                var stdout = sshCommand.Execute();
-                var stderr = sshCommand.Error;
-                var outputTruncated = false;
+            var capture = await SshCommandStreamPump.CaptureAsync(
+                    sshCommand.OutputStream,
+                    sshCommand.ExtendedOutputStream,
+                    executeAsync: sshCommand.ExecuteAsync,
+                    maxOutputChars,
+                    ct)
+                .ConfigureAwait(false);
 
-                stdout = Truncate(stdout, maxOutputChars, ref outputTruncated);
-                stderr = Truncate(stderr, maxOutputChars, ref outputTruncated);
+            var stdout = capture.StandardOutput;
+            var stderr = capture.StandardError;
+            var outputTruncated = capture.StdoutTruncated || capture.StderrTruncated;
 
-                return new SshCommandResult(
-                    profile.Name,
-                    profile.Host,
-                    profile.Port,
-                    profile.Username,
-                    command.Command,
-                    string.IsNullOrWhiteSpace(workingDirectory) ? "." : workingDirectory,
-                    sshCommand.ExitStatus.GetValueOrDefault(-1),
-                    stdout,
-                    stderr,
-                    TimedOut: false,
-                    OutputTruncated: outputTruncated);
-            }
-            catch (SshOperationTimeoutException ex)
+            if (capture.ExecutionException is SshOperationTimeoutException timeoutException)
             {
                 return new SshCommandResult(
                     profile.Name,
@@ -330,11 +322,29 @@ public sealed class SshService(
                     command.Command,
                     string.IsNullOrWhiteSpace(workingDirectory) ? "." : workingDirectory,
                     ExitCode: -1,
-                    StandardOutput: string.Empty,
-                    StandardError: ex.Message,
+                    StandardOutput: stdout,
+                    StandardError: string.IsNullOrWhiteSpace(stderr) ? timeoutException.Message : stderr,
                     TimedOut: true,
-                    OutputTruncated: false);
+                    OutputTruncated: outputTruncated);
             }
+
+            if (capture.ExecutionException is not null)
+            {
+                throw capture.ExecutionException;
+            }
+
+            return new SshCommandResult(
+                profile.Name,
+                profile.Host,
+                profile.Port,
+                profile.Username,
+                command.Command,
+                string.IsNullOrWhiteSpace(workingDirectory) ? "." : workingDirectory,
+                sshCommand.ExitStatus.GetValueOrDefault(-1),
+                stdout,
+                stderr,
+                TimedOut: false,
+                OutputTruncated: outputTruncated);
         }
         finally
         {
@@ -345,16 +355,17 @@ public sealed class SshService(
         }
     }
 
-    private SshFileWriteResult WriteTextWithConnectionInfo(
+    private async Task<SshFileWriteResult> WriteTextWithConnectionInfoAsync(
         ConfiguredSshProfile profile,
         ConnectionInfo connectionInfo,
-        WriteSshTextCommand command)
+        WriteSshTextCommand command,
+        CancellationToken ct)
     {
         using var client = CreateSftpClient(connectionInfo, profile, out var hostKeyValidation);
         client.ConnectionInfo.Timeout = TimeSpan.FromSeconds(60);
         try
         {
-            client.Connect();
+            await client.ConnectAsync(ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (hostKeyValidation.WasRejected && ex is SshException)
         {
@@ -549,22 +560,39 @@ public sealed class SshService(
 
     private static string BuildRemoteCommand(string command, IReadOnlyList<string>? args, string? workingDirectory)
     {
-        var invocation = args is { Count: > 0 }
-            ? BuildExecutableInvocation(command, args)
-            : command;
+        var builder = new StringBuilder();
+        builder.Append("sh -lc ");
+        builder.Append('\'');
 
-        var script = string.IsNullOrWhiteSpace(workingDirectory)
-            ? invocation
-            : $"cd {QuotePosix(workingDirectory)} && {invocation}";
+        if (!string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            builder.Append("cd ");
+            AppendQuotedPosix(builder, workingDirectory);
+            builder.Append(" && ");
+        }
 
-        return $"sh -lc {QuotePosix(script)}";
+        builder.Append("exec ");
+        AppendQuotedPosix(builder, command);
+
+        if (args is { Count: > 0 })
+        {
+            for (var index = 0; index < args.Count; index++)
+            {
+                builder.Append(' ');
+                AppendQuotedPosix(builder, args[index]);
+            }
+        }
+
+        builder.Append('\'');
+        return builder.ToString();
     }
 
-    private static string BuildExecutableInvocation(string command, IReadOnlyList<string> args) =>
-        "exec " + string.Join(" ", new[] { command }.Concat(args).Select(QuotePosix));
-
-    private static string QuotePosix(string value) =>
-        $"'{value.Replace("'", "'\"'\"'")}'";
+    private static void AppendQuotedPosix(StringBuilder builder, string value)
+    {
+        builder.Append('\'');
+        builder.Append(value.Replace("'", "'\"'\"'", StringComparison.Ordinal));
+        builder.Append('\'');
+    }
 
     private static Fin<Unit> ValidateCommand(ConfiguredSshProfile profile, ExecuteSshCommand command)
     {
@@ -586,13 +614,19 @@ public sealed class SshService(
         }
 
         var executable = ExtractExecutableName(command.Command);
-        var sudoAllowed = IsSudoCommand(executable) && profile.AllowSudoCommand;
+        var allowAllCommands = profile.AllowAllCommands;
+        var sudoAllowed = IsSudoCommand(executable) && (profile.AllowSudoCommand || allowAllCommands);
         var deniedCommands = new System.Collections.Generic.HashSet<string>(
             profile.DeniedCommands.Where(static value => !string.IsNullOrWhiteSpace(value)),
             StringComparer.OrdinalIgnoreCase);
-        if (!sudoAllowed && deniedCommands.Contains(executable))
+        if (!allowAllCommands && !sudoAllowed && deniedCommands.Contains(executable))
         {
             return Error.New($"SSH command '{executable}' is denied by profile '{profile.Name}'.");
+        }
+
+        if (allowAllCommands)
+        {
+            return LanguageExt.Prelude.unit;
         }
 
         var allowedCommands = new System.Collections.Generic.HashSet<string>(

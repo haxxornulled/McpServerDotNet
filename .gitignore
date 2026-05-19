@@ -16,6 +16,7 @@ tmp-inference-smoke-console.txt
 .mcp.json
 test.tmp
 /*.zip
+src/McpServer.Application/workspace/
 # Local shared-host SSH profiles and vault. Do not commit machine-specific secrets.
 config/mcpserver/*.local.json
 config/mcpserver/*.lock

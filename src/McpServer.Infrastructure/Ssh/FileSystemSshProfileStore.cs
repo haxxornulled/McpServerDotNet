@@ -1,9 +1,11 @@
 using System.Text.Json;
+using System.Collections.Concurrent;
 
 namespace McpServer.Infrastructure.Ssh;
 
 public static class FileSystemSshProfileStore
 {
+    private static readonly ConcurrentDictionary<string, object> Locks = new(StringComparer.OrdinalIgnoreCase);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true,
@@ -58,19 +60,33 @@ public static class FileSystemSshProfileStore
             Directory.CreateDirectory(directory);
         }
 
-        var document = new SshProfilesDocument
+        var lockPath = resolvedPath + ".lock";
+        var lockDirectory = Path.GetDirectoryName(resolvedPath);
+        if (!string.IsNullOrWhiteSpace(lockDirectory))
         {
-            Profiles = profiles
-                .Where(static profile => !string.IsNullOrWhiteSpace(profile.Name))
-                .ToDictionary(
-                    static profile => profile.Name,
-                    static profile => MapProfile(profile),
-                    StringComparer.OrdinalIgnoreCase)
-        };
+            Directory.CreateDirectory(lockDirectory);
+        }
 
-        File.WriteAllText(
-            resolvedPath,
-            JsonSerializer.Serialize(document, JsonOptions));
+        lock (Locks.GetOrAdd(resolvedPath, static _ => new object()))
+        {
+            using var lockStream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            WriteProfilesCore(resolvedPath, lockDirectory, profiles);
+        }
+    }
+
+    internal static void WriteProfilesUnlocked(
+        string contentRoot,
+        string path,
+        IEnumerable<ConfiguredSshProfile> profiles)
+    {
+        var resolvedPath = ResolveConfiguredPath(contentRoot, path);
+        var directory = Path.GetDirectoryName(resolvedPath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        WriteProfilesCore(resolvedPath, directory, profiles);
     }
 
     private static void MergeProfiles(
@@ -160,7 +176,7 @@ public static class FileSystemSshProfileStore
 
     private sealed class SshProfilesDocument
     {
-        public IDictionary<string, SshProfileDocument> Profiles { get; set; } =
+        public IReadOnlyDictionary<string, SshProfileDocument> Profiles { get; set; } =
             new Dictionary<string, SshProfileDocument>(StringComparer.OrdinalIgnoreCase);
     }
 
@@ -186,13 +202,15 @@ public static class FileSystemSshProfileStore
 
         public bool AcceptUnknownHostKey { get; set; }
 
-        public IList<string> AllowedCommands { get; set; } = [];
+        public IReadOnlyList<string> AllowedCommands { get; set; } = [];
 
-        public IList<string> DeniedCommands { get; set; } = [];
+        public IReadOnlyList<string> DeniedCommands { get; set; } = [];
 
-        public IList<string> AllowedRemotePathPrefixes { get; set; } = [];
+        public IReadOnlyList<string> AllowedRemotePathPrefixes { get; set; } = [];
 
         public bool AllowSudoCommand { get; set; }
+
+        public bool AllowAllCommands { get; set; }
     }
 
     private static SshProfileDocument MapProfile(ConfiguredSshProfile profile)
@@ -212,7 +230,8 @@ public static class FileSystemSshProfileStore
             AllowedCommands = profile.AllowedCommands.ToList(),
             DeniedCommands = profile.DeniedCommands.ToList(),
             AllowedRemotePathPrefixes = profile.AllowedRemotePathPrefixes.ToList(),
-            AllowSudoCommand = profile.AllowSudoCommand
+            AllowSudoCommand = profile.AllowSudoCommand,
+            AllowAllCommands = profile.AllowAllCommands
         };
     }
 
@@ -232,6 +251,48 @@ public static class FileSystemSshProfileStore
             profile.AllowedCommands.ToArray(),
             profile.DeniedCommands.ToArray(),
             profile.AllowedRemotePathPrefixes.ToArray(),
-            profile.AllowSudoCommand);
+            profile.AllowSudoCommand,
+            profile.AllowAllCommands);
+    }
+
+    private static void WriteProfilesCore(
+        string resolvedPath,
+        string? directory,
+        IEnumerable<ConfiguredSshProfile> profiles)
+    {
+        var documentProfiles = new Dictionary<string, SshProfileDocument>(StringComparer.OrdinalIgnoreCase);
+        var document = new SshProfilesDocument
+        {
+            Profiles = documentProfiles
+        };
+        foreach (var profile in profiles)
+        {
+            if (profile is null || string.IsNullOrWhiteSpace(profile.Name))
+            {
+                continue;
+            }
+
+            documentProfiles[profile.Name.Trim()] = MapProfile(profile);
+        }
+
+        var tempPath = Path.Combine(directory ?? Path.GetTempPath(), Path.GetRandomFileName());
+        try
+        {
+            File.WriteAllText(tempPath, JsonSerializer.Serialize(document, JsonOptions));
+            File.Move(tempPath, resolvedPath, true);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                try
+                {
+                    File.Delete(tempPath);
+                }
+                catch
+                {
+                }
+            }
+        }
     }
 }

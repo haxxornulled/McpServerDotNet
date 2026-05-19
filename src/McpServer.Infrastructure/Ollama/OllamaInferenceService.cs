@@ -142,7 +142,7 @@ public sealed class OllamaInferenceService : ILocalInferenceService
                     enabled: _options.Enabled,
                     baseUrl: _baseUri.ToString(),
                     defaultModel: _options.DefaultModel,
-                    availableModels: global::System.Array.AsReadOnly(global::System.Array.Empty<string>()),
+                    availableModels: Array.Empty<string>(),
                     serverReachable: false,
                     message: error.Message)));
         }
@@ -170,7 +170,7 @@ public sealed class OllamaInferenceService : ILocalInferenceService
                     enabled: _options.Enabled,
                     baseUrl: _baseUri.ToString(),
                     defaultModel: _options.DefaultModel,
-                    availableModels: global::System.Array.AsReadOnly(global::System.Array.Empty<string>()),
+                    availableModels: Array.Empty<string>(),
                     serverReachable: false,
                     message: $"Ollama returned HTTP {(int)response.StatusCode}: {TrimForError(body)}"));
             }
@@ -192,7 +192,7 @@ public sealed class OllamaInferenceService : ILocalInferenceService
                 enabled: _options.Enabled,
                 baseUrl: _baseUri.ToString(),
                 defaultModel: _options.DefaultModel,
-                availableModels: global::System.Array.AsReadOnly(global::System.Array.Empty<string>()),
+                availableModels: Array.Empty<string>(),
                 serverReachable: false,
                 message: "Ollama status request timed out."));
         }
@@ -208,7 +208,7 @@ public sealed class OllamaInferenceService : ILocalInferenceService
                 enabled: _options.Enabled,
                 baseUrl: _baseUri.ToString(),
                 defaultModel: _options.DefaultModel,
-                availableModels: global::System.Array.AsReadOnly(global::System.Array.Empty<string>()),
+                availableModels: Array.Empty<string>(),
                 serverReachable: false,
                 message: ex.Message));
         }
@@ -219,7 +219,7 @@ public sealed class OllamaInferenceService : ILocalInferenceService
         LocalInferenceRequest request,
         double temperature)
     {
-        var messages = new List<object>();
+        var messages = new List<object>(string.IsNullOrWhiteSpace(request.SystemPrompt) ? 1 : 2);
         if (!string.IsNullOrWhiteSpace(request.SystemPrompt))
         {
             messages.Add(new
@@ -340,7 +340,18 @@ public sealed class OllamaInferenceService : ILocalInferenceService
             return model;
         }
 
-        if (!_options.AllowedModels.Contains(model, StringComparer.OrdinalIgnoreCase))
+        var allowedModels = _options.AllowedModels;
+        var modelAllowed = false;
+        foreach (var allowedModel in allowedModels)
+        {
+            if (string.Equals(allowedModel, model, StringComparison.OrdinalIgnoreCase))
+            {
+                modelAllowed = true;
+                break;
+            }
+        }
+
+        if (!modelAllowed)
         {
             error = $"Requested model is not allowed: {model}.";
         }
@@ -395,10 +406,10 @@ public sealed class OllamaInferenceService : ILocalInferenceService
         if (!document.RootElement.TryGetProperty("models", out var models) ||
             models.ValueKind != JsonValueKind.Array)
         {
-            return global::System.Array.AsReadOnly(global::System.Array.Empty<string>());
+            return Array.Empty<string>();
         }
 
-        var names = new List<string>();
+        var names = new List<string>(models.GetArrayLength());
         foreach (var model in models.EnumerateArray())
         {
             if (model.TryGetProperty("name", out var name) &&
@@ -409,7 +420,7 @@ public sealed class OllamaInferenceService : ILocalInferenceService
             }
         }
 
-        return global::System.Array.AsReadOnly(names.ToArray());
+        return names.ToArray();
     }
 
     private static string TrimForError(string value)

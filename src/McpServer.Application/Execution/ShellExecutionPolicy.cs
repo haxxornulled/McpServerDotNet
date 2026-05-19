@@ -14,12 +14,10 @@ public sealed class ShellExecutionPolicy : IShellExecutionPolicy
     public ShellExecutionPolicy(ShellExecutionPolicyOptions options)
     {
         _options = options;
-        _allowedCommands = new System.Collections.Generic.HashSet<string>(
-            options.AllowedCommands.Where(static command => !string.IsNullOrWhiteSpace(command)),
-            StringComparer.OrdinalIgnoreCase);
-        _deniedCommands = new System.Collections.Generic.HashSet<string>(
-            options.DeniedCommands.Where(static command => !string.IsNullOrWhiteSpace(command)),
-            StringComparer.OrdinalIgnoreCase);
+        _allowedCommands = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        _deniedCommands = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        AddNormalized(_allowedCommands, options.AllowedCommands);
+        AddNormalized(_deniedCommands, options.DeniedCommands);
     }
 
     public Fin<Unit> Validate(
@@ -97,5 +95,16 @@ public sealed class ShellExecutionPolicy : IShellExecutionPolicy
 
         var separatorIndex = command.IndexOfAny([' ', '\t']);
         return separatorIndex < 0 ? command : command[..separatorIndex];
+    }
+
+    private static void AddNormalized(System.Collections.Generic.HashSet<string> target, IReadOnlyCollection<string> values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                target.Add(value.Trim());
+            }
+        }
     }
 }

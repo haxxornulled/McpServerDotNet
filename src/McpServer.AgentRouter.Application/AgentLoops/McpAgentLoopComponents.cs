@@ -205,7 +205,7 @@ public sealed class McpAgentToolExecutor : IAgentToolExecutor
             return $"Listed {path}.";
         }
 
-        var names = new List<string>();
+        var names = new List<string>(8);
         var directoryCount = 0;
         var fileCount = 0;
         var totalCount = 0;

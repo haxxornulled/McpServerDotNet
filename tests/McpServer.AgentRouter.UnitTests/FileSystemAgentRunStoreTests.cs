@@ -140,6 +140,47 @@ public sealed class FileSystemAgentRunStoreTests
         }
     }
 
+    [Fact]
+    public async Task Concurrent_Saves_To_Same_Run_Should_Leave_Readable_Files()
+    {
+        var rootPath = CreateTemporaryDirectory();
+        try
+        {
+            var store = CreateStore(rootPath);
+            var tasks = new List<Task>();
+
+            for (var i = 0; i < 8; i++)
+            {
+                var index = i;
+                tasks.Add(Task.Run(async () =>
+                {
+                    var run = CreateCompletedRun();
+                    run.Id = "run-shared";
+                    run.Result = "result-" + index;
+                    await store.SaveAsync(run, new AgentRunRequest
+                    {
+                        Model = "fast-local",
+                        Goal = "Concurrent save test"
+                    }, CancellationToken.None);
+                }));
+            }
+
+            await Task.WhenAll(tasks);
+
+            var loaded = await store.GetAsync("run-shared", CancellationToken.None);
+            Assert.True(loaded.IsSucc);
+            loaded.IfSucc(value =>
+            {
+                Assert.Equal("run-shared", value.Id);
+                Assert.StartsWith("result-", value.Result);
+            });
+        }
+        finally
+        {
+            DeleteDirectory(rootPath);
+        }
+    }
+
     [Theory]
     [InlineData(".")]
     [InlineData("..")]

@@ -33,6 +33,7 @@
     <ProjectReference Include="..\McpServer.Protocol\McpServer.Protocol.csproj" />
     <ProjectReference Include="..\McpServer.Application\McpServer.Application.csproj" />
     <ProjectReference Include="..\McpServer.Infrastructure\McpServer.Infrastructure.csproj" />
+    <ProjectReference Include="..\McpServer.Domain\McpServer.Domain.csproj" />
   </ItemGroup>
   <UsingTask TaskName="StopRunningHostProcessesTask"
              TaskFactory="RoslynCodeTaskFactory"

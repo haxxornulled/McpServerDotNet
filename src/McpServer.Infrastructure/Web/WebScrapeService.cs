@@ -39,12 +39,14 @@ public sealed class WebScrapeService(
                 Fail: _ => throw new InvalidOperationException("Unexpected web fetch failure while handling success."));
 
             var document = new HtmlParser().ParseDocument(page.Content);
-            var elements = document.QuerySelectorAll(command.Selector).ToArray();
+            var elements = document.QuerySelectorAll(command.Selector);
             var limit = Math.Max(1, command.MaxResults);
-            var matches = elements
-                .Take(limit)
-                .Select((element, index) => CreateMatch(index + 1, element, command.Attribute, page.Url))
-                .ToArray();
+            var matchCount = Math.Min(limit, elements.Length);
+            var matches = new WebScrapeMatch[matchCount];
+            for (var i = 0; i < matchCount; i++)
+            {
+                matches[i] = CreateMatch(i + 1, elements[i], command.Attribute, page.Url);
+            }
 
             started.Stop();
 

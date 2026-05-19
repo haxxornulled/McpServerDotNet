@@ -53,16 +53,12 @@ public static class WorkspacePathResolver
 
         if (allowedRoots is not null)
         {
-            roots.AddRange(allowedRoots
-                .Where(static root => !string.IsNullOrWhiteSpace(root))
-                .Select(root => ResolveConfiguredPath(root, baseDirectory)));
+            AppendResolvedRoots(roots, allowedRoots, baseDirectory);
         }
 
         if (additionalAllowedRoots is not null)
         {
-            roots.AddRange(additionalAllowedRoots
-                .Where(static root => !string.IsNullOrWhiteSpace(root))
-                .Select(root => ResolveConfiguredPath(root, baseDirectory)));
+            AppendResolvedRoots(roots, additionalAllowedRoots, baseDirectory);
         }
 
         return WorkspacePathState.NormalizeAllowedRoots(roots);
@@ -115,6 +111,17 @@ public static class WorkspacePathResolver
     {
         return !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(WorkspaceRootEnvironmentVariable)) ||
                !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(WorkspaceRootAlternateEnvironmentVariable));
+    }
+
+    private static void AppendResolvedRoots(List<string> roots, IEnumerable<string> candidates, string? baseDirectory)
+    {
+        foreach (var candidate in candidates)
+        {
+            if (!string.IsNullOrWhiteSpace(candidate))
+            {
+                roots.Add(ResolveConfiguredPath(candidate, baseDirectory));
+            }
+        }
     }
 
     private static bool ShouldUseApplicationDefaultWorkspace(

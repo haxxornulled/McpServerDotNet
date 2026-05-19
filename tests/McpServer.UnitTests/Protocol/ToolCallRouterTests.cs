@@ -371,7 +371,7 @@ public sealed class ToolCallRouterTests
         ISshService? sshService = null,
         IPathPolicy? pathPolicy = null,
         IResourcePathTranslator? resourcePathTranslator = null,
-        McpServer.Domain.Workspace.IWorkspaceMutationService? workspaceMutationService = null,
+        McpServer.Application.Abstractions.Files.IWorkspaceMutationService? workspaceMutationService = null,
         ILogger<ToolCallRouter>? toolRouterLogger = null)
     {
         fileSystemService ??= Substitute.For<IFileSystemService>();

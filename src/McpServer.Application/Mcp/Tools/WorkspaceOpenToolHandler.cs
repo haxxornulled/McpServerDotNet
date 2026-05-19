@@ -3,15 +3,15 @@ using LanguageExt;
 using LanguageExt.Common;
 using McpServer.Application.Abstractions.Files;
 using McpServer.Application.Abstractions.Mcp;
+using McpServer.Application.Files.Results;
 using McpServer.Application.Mcp.Validation;
 using McpServer.Application.Mcp.Tools;
-using McpServer.Domain.Workspace;
 using Microsoft.Extensions.Logging;
 
 namespace McpServer.Application.Mcp.Tools;
 
 public sealed class WorkspaceOpenToolHandler(
-    McpServer.Domain.Workspace.IWorkspaceMutationService workspaceMutationService,
+    IWorkspaceMutationService workspaceMutationService,
     ILogger<WorkspaceOpenToolHandler> logger,
     IPathPolicy pathPolicy) : IToolHandler<WorkspaceOpenRequest>
 {

@@ -151,6 +151,7 @@ Default rules:
 - inline shell switches are denied by default
 - output and timeout are bounded
 - `sudo` remains denied unless a profile explicitly sets `AllowSudoCommand=true`
+- If a profile explicitly sets `AllowAllCommands=true`, the allowlist and command-deny checks are bypassed for that profile only.
 
 Profile loading order:
 
@@ -172,7 +173,7 @@ The repo ignores `config/mcpserver/*.local.json`. Keep templates or examples che
 `verify` streams child `dotnet` output into your terminal. When SSH execution is enabled, `smoke` also echoes SSH stdout/stderr blocks back to the terminal for each request.
 
 - For a real host, add the credential to the vault and point the repo-local SSH profile at `passwordVaultItemName`.
-- For admin workflows, create a separate SSH profile with `AllowSudoCommand=true` instead of broadening the default profile.
+- For admin workflows, create a separate SSH profile with `AllowSudoCommand=true` instead of broadening the default profile. Use `AllowAllCommands=true` only for intentionally unrestricted profiles such as `root`.
 
 ## Autonomous loop
 

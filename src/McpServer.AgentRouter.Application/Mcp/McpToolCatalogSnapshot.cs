@@ -35,7 +35,7 @@ public sealed class McpToolCatalogSnapshot
     /// <summary>
     /// Gets or sets the listed tools.
     /// </summary>
-    public IList<McpToolCatalogItem> Tools { get; set; } = new List<McpToolCatalogItem>();
+    public IReadOnlyList<McpToolCatalogItem> Tools { get; set; } = Array.Empty<McpToolCatalogItem>();
 }
 
 /// <summary>

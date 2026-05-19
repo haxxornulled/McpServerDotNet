@@ -77,16 +77,27 @@ public sealed class ShellExecutionPolicyOptions
         IReadOnlyCollection<string> defaultCommands)
     {
         var source = commands ?? defaultCommands;
-
         if (source.Count == 0)
         {
             return Array.Empty<string>();
         }
 
-        return source
-            .Where(static command => !string.IsNullOrWhiteSpace(command))
-            .Select(static command => command.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        var values = new List<string>();
+        var seen = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var command in source)
+        {
+            if (string.IsNullOrWhiteSpace(command))
+            {
+                continue;
+            }
+
+            var trimmed = command.Trim();
+            if (seen.Add(trimmed))
+            {
+                values.Add(trimmed);
+            }
+        }
+
+        return values.ToArray();
     }
 }

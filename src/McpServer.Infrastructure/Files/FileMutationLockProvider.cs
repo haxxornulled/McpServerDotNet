@@ -43,11 +43,7 @@ public sealed class FileMutationLockProvider : IFileMutationLockProvider
     {
         ArgumentNullException.ThrowIfNull(normalizedPaths);
 
-        var ordered = normalizedPaths
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Distinct(PathComparison.Comparer)
-            .OrderBy(x => x, PathComparison.Comparer)
-            .ToArray();
+        var ordered = NormalizeAndSort(normalizedPaths);
 
         if (ordered.Length == 0)
         {
@@ -92,6 +88,27 @@ public sealed class FileMutationLockProvider : IFileMutationLockProvider
     {
         var hash = PathComparison.Comparer.GetHashCode(normalizedPath) & int.MaxValue;
         return _locks[hash % _locks.Length];
+    }
+
+    private static string[] NormalizeAndSort(IEnumerable<string> normalizedPaths)
+    {
+        var values = new List<string>();
+        var seen = new System.Collections.Generic.HashSet<string>(PathComparison.Comparer);
+        foreach (var path in normalizedPaths)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                continue;
+            }
+
+            if (seen.Add(path))
+            {
+                values.Add(path);
+            }
+        }
+
+        values.Sort(PathComparison.Comparer);
+        return values.ToArray();
     }
 
     private sealed class Releaser : IAsyncDisposable

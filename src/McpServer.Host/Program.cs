@@ -8,8 +8,6 @@ using McpServer.Infrastructure.Logging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Serilog;
-using VapeCache.Abstractions.Caching;
-using VapeCache.Extensions.DependencyInjection;
 
 Log.Logger = SerilogBootstrap.CreateBootstrapLogger();
 
@@ -57,7 +55,6 @@ try
                     AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
                 });
 
-            RegisterVapeCache(context, services);
         })
         .ConfigureContainer<ContainerBuilder>((context, container) =>
         {
@@ -75,31 +72,4 @@ catch (Exception ex)
 finally
 {
     await Log.CloseAndFlushAsync().ConfigureAwait(false);
-}
-
-static void RegisterVapeCache(HostBuilderContext context, IServiceCollection services)
-{
-    var redisSection = context.Configuration.GetSection("RedisConnection");
-    var envConnStr = Environment.GetEnvironmentVariable("VAPECACHE_REDIS_CONNECTIONSTRING");
-    var redisConfigured = false;
-
-    if (!string.IsNullOrWhiteSpace(envConnStr))
-    {
-        redisConfigured = true;
-    }
-    else if (redisSection.Exists())
-    {
-        var host = redisSection["Host"];
-        var connectionString = redisSection["ConnectionString"];
-        redisConfigured = !string.IsNullOrWhiteSpace(host) || !string.IsNullOrWhiteSpace(connectionString);
-    }
-
-    if (redisConfigured)
-    {
-        services.AddVapeCache(context.Configuration);
-        return;
-    }
-
-    services.AddVapeCacheInMemory(context.Configuration)
-        .WithCacheStampedeProfile(CacheStampedeProfile.Balanced);
 }

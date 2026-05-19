@@ -27,7 +27,8 @@ public sealed class FileSystemSshProfileStoreTests
                 AllowedCommands: ["pwd"],
                 DeniedCommands: [],
                 AllowedRemotePathPrefixes: ["/tmp"],
-                AllowSudoCommand: false)
+                AllowSudoCommand: false,
+                AllowAllCommands: true)
         };
 
         FileSystemSshProfileStore.SaveProfiles(root, repoFile, profiles);
@@ -45,5 +46,6 @@ public sealed class FileSystemSshProfileStoreTests
         var loadedProfile = loaded[0];
         Assert.Equal("dev", loadedProfile.PasswordVaultItemName);
         Assert.Equal("dev-passphrase", loadedProfile.PrivateKeyPassphraseVaultItemName);
+        Assert.True(loadedProfile.AllowAllCommands);
     }
 }

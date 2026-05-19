@@ -285,6 +285,8 @@ public sealed class SshProfileOptions
     public IList<string> AllowedRemotePathPrefixes { get; set; } = new List<string>();
 
     public bool AllowSudoCommand { get; set; }
+
+    public bool AllowAllCommands { get; set; }
 }
 
 public class AgentLoopOptions

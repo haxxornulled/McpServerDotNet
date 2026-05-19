@@ -37,16 +37,13 @@ public sealed class FileSystemSshProfileStore : ISshProfileStore
         try
         {
             var options = _settings;
-            var catalog = new SshProfileCatalog
-            {
-                Profiles = new Dictionary<string, SshProfileDefinition>(StringComparer.OrdinalIgnoreCase),
-                Sources = new List<SshProfileSourceStatus>()
-            };
+            var profiles = new Dictionary<string, SshProfileDefinition>(StringComparer.OrdinalIgnoreCase);
+            var sources = new List<SshProfileSourceStatus>();
 
             if (options.AllowInlineProfiles && options.Profiles.Count > 0)
             {
-                MergeProfiles(catalog.Profiles, options.Profiles);
-                catalog.Sources.Add(new SshProfileSourceStatus
+                MergeProfiles(profiles, options.Profiles);
+                sources.Add(new SshProfileSourceStatus
                 {
                     SourceName = "inline-appsettings",
                     Path = "AgentRouter:SshExecution:Profiles",
@@ -61,7 +58,8 @@ public sealed class FileSystemSshProfileStore : ISshProfileStore
             {
                 var repoPath = ResolveConfiguredPath(options.RepoProfilesFilePath);
                 await LoadFileAsync(
-                        catalog,
+                        profiles,
+                        sources,
                         sourceName: "repo-local",
                         path: repoPath,
                         cancellationToken)
@@ -69,7 +67,7 @@ public sealed class FileSystemSshProfileStore : ISshProfileStore
             }
             else
             {
-                catalog.Sources.Add(new SshProfileSourceStatus
+                sources.Add(new SshProfileSourceStatus
                 {
                     SourceName = "repo-local",
                     Path = ResolveConfiguredPath(options.RepoProfilesFilePath),
@@ -83,7 +81,8 @@ public sealed class FileSystemSshProfileStore : ISshProfileStore
             {
                 var userPath = ResolveUserProfilesPath(options.UserProfilesFilePath);
                 await LoadFileAsync(
-                        catalog,
+                        profiles,
+                        sources,
                         sourceName: "user-level",
                         path: userPath,
                         cancellationToken)
@@ -91,7 +90,7 @@ public sealed class FileSystemSshProfileStore : ISshProfileStore
             }
             else
             {
-                catalog.Sources.Add(new SshProfileSourceStatus
+                sources.Add(new SshProfileSourceStatus
                 {
                     SourceName = "user-level",
                     Path = ResolveUserProfilesPath(options.UserProfilesFilePath),
@@ -101,7 +100,11 @@ public sealed class FileSystemSshProfileStore : ISshProfileStore
                 });
             }
 
-            return Fin<SshProfileCatalog>.Succ(catalog);
+            return Fin<SshProfileCatalog>.Succ(new SshProfileCatalog
+            {
+                Profiles = profiles,
+                Sources = sources
+            });
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -110,14 +113,15 @@ public sealed class FileSystemSshProfileStore : ISshProfileStore
     }
 
     private async Task LoadFileAsync(
-        SshProfileCatalog catalog,
+        IDictionary<string, SshProfileDefinition> profiles,
+        IList<SshProfileSourceStatus> sources,
         string sourceName,
         string path,
         CancellationToken cancellationToken)
     {
         if (!File.Exists(path))
         {
-            catalog.Sources.Add(new SshProfileSourceStatus
+            sources.Add(new SshProfileSourceStatus
             {
                 SourceName = sourceName,
                 Path = path,
@@ -136,22 +140,22 @@ public sealed class FileSystemSshProfileStore : ISshProfileStore
                 cancellationToken)
             .ConfigureAwait(false);
 
-        var profiles = document?.Profiles ?? new Dictionary<string, SshProfileDefinition>(StringComparer.OrdinalIgnoreCase);
-        MergeProfiles(catalog.Profiles, profiles);
+        var documentProfiles = document?.Profiles ?? new Dictionary<string, SshProfileDefinition>(StringComparer.OrdinalIgnoreCase);
+        MergeProfiles(profiles, documentProfiles);
 
-        catalog.Sources.Add(new SshProfileSourceStatus
+        sources.Add(new SshProfileSourceStatus
         {
             SourceName = sourceName,
             Path = path,
             Enabled = true,
             Exists = true,
-            ProfileCount = profiles.Count,
-            Message = profiles.Count == 0 ? "Profile file exists but contains no profiles." : null
+            ProfileCount = documentProfiles.Count,
+            Message = documentProfiles.Count == 0 ? "Profile file exists but contains no profiles." : null
         });
 
         _logger.LogDebug(
             "Loaded {ProfileCount} SSH profiles from {SourceName} profile file {Path}.",
-            profiles.Count,
+            documentProfiles.Count,
             sourceName,
             path);
     }
@@ -214,10 +218,11 @@ public sealed class FileSystemSshProfileStore : ISshProfileStore
             WorkingDirectory = source.WorkingDirectory,
             HostKeySha256 = source.HostKeySha256,
             AcceptUnknownHostKey = source.AcceptUnknownHostKey,
-            AllowedCommands = source.AllowedCommands.ToList(),
-            DeniedCommands = source.DeniedCommands.ToList(),
-            AllowedRemotePathPrefixes = source.AllowedRemotePathPrefixes.ToList(),
-            AllowSudoCommand = source.AllowSudoCommand
+            AllowedCommands = source.AllowedCommands.ToArray(),
+            DeniedCommands = source.DeniedCommands.ToArray(),
+            AllowedRemotePathPrefixes = source.AllowedRemotePathPrefixes.ToArray(),
+            AllowSudoCommand = source.AllowSudoCommand,
+            AllowAllCommands = source.AllowAllCommands
         };
     }
 }

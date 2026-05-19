@@ -2,6 +2,7 @@ using LanguageExt;
 using McpServer.Application.Abstractions.Files;
 using McpServer.Application.Mcp.Tools;
 using McpServer.Application.Files;
+using McpServer.Application.Files.Results;
 using McpServer.Infrastructure.Files;
 using Microsoft.Extensions.Logging;
 using NSubstitute;

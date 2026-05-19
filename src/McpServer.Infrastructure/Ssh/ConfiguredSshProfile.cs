@@ -14,7 +14,8 @@ public sealed record ConfiguredSshProfile(
     IReadOnlyCollection<string> AllowedCommands,
     IReadOnlyCollection<string> DeniedCommands,
     IReadOnlyCollection<string> AllowedRemotePathPrefixes,
-    bool AllowSudoCommand = false)
+    bool AllowSudoCommand = false,
+    bool AllowAllCommands = false)
 {
     public ConfiguredSshProfile(
         string Name,
@@ -41,7 +42,8 @@ public sealed record ConfiguredSshProfile(
             AllowedCommands: [],
             DeniedCommands: [],
             AllowedRemotePathPrefixes: [],
-            AllowSudoCommand: false)
+            AllowSudoCommand: false,
+            AllowAllCommands: false)
     {
     }
 }

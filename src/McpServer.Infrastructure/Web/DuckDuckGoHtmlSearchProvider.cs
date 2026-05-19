@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Linq;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
@@ -58,7 +57,7 @@ public sealed class DuckDuckGoHtmlSearchProvider(
                 ];
             }
 
-            var limitedResults = results.Take(Math.Max(1, command.MaxResults)).ToArray();
+            var limitedResults = LimitResults(results, Math.Max(1, command.MaxResults));
             logger.LogInformation("Executed web search with {ResultCount} result(s)", limitedResults.Length);
 
             return limitedResults;
@@ -154,22 +153,23 @@ public sealed class DuckDuckGoHtmlSearchProvider(
         }
 
         var document = new HtmlParser().ParseDocument(html);
-        var anchors = document.QuerySelectorAll("a.result__a").ToList();
-        if (anchors.Count == 0)
+        var anchors = document.QuerySelectorAll("a.result__a");
+        if (anchors.Length == 0)
         {
             return Array.Empty<WebSearchResult>();
         }
 
         var limit = Math.Max(1, maxResults);
-        var results = new List<WebSearchResult>(Math.Min(limit, anchors.Count));
+        var results = new List<WebSearchResult>(Math.Min(limit, anchors.Length));
 
-        foreach (var anchor in anchors)
+        for (var i = 0; i < anchors.Length; i++)
         {
             if (results.Count >= limit)
             {
                 break;
             }
 
+            var anchor = anchors[i];
             var href = anchor.GetAttribute("href");
             if (string.IsNullOrWhiteSpace(href))
             {
@@ -196,6 +196,18 @@ public sealed class DuckDuckGoHtmlSearchProvider(
         }
 
         return results;
+    }
+
+    private static WebSearchResult[] LimitResults(IReadOnlyList<WebSearchResult> results, int maxResults)
+    {
+        var limit = Math.Min(Math.Max(1, maxResults), results.Count);
+        var limited = new WebSearchResult[limit];
+        for (var i = 0; i < limit; i++)
+        {
+            limited[i] = results[i];
+        }
+
+        return limited;
     }
 
     private static IElement? FindResultContainer(IElement anchor)

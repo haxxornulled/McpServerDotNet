@@ -64,12 +64,33 @@ dotnet run --project .\tools\McpServer.SshVaultCli -- add dev --secret-file .\se
 
 4. Use the shared host SSH tool for real SSH execution. The host resolves `passwordVaultItemName` and `privateKeyPassphraseVaultItemName` from the vault and does not use environment-variable-backed secrets.
 
+## Common commands
+
+These are the commands you will usually run in order:
+
+```text
+dotnet run --project .\tools\McpServer.SshVaultCli -- add root --description "SSH password for root"
+dotnet run --project .\tools\McpServer.SshVaultCli -- profile upsert root --host 173.255.205.169 --username root --password-vault-item root --working-directory /root --host-key-sha256 SHA256:Q7mMEDNG2w/v+PBa0ogNmW3ECGDGapU2NFgKRX5/5yI --allow-sudo-command true --allow-all-commands true
+dotnet run --project .\tools\McpServer.SshVaultCli -- profile link root --password-vault-item root
+dotnet run --project .\tools\McpServer.SshVaultCli -- profile list
+dotnet run --project .\tools\McpServer.SshVaultCli -- verify root
+cmd.exe /c "set MCPSERVER_INTEGRATION_LIVE_SSH=1&& dotnet test .\tests\McpServer.IntegrationTests\McpServer.IntegrationTests.csproj -c Release --no-build --filter FullyQualifiedName~Ssh -v minimal"
+```
+
+If you rotate the password later, repeat `vault add root` and then `profile link root --password-vault-item root`.
+
 ## CLI reference
 
 The vault CLI is:
 
 ```text
 dotnet run --project .\tools\McpServer.SshVaultCli -- help
+```
+
+The profile CLI is part of the same executable:
+
+```text
+dotnet run --project .\tools\McpServer.SshVaultCli -- profile help
 ```
 
 ### `add`
@@ -139,6 +160,30 @@ dotnet run --project .\tools\McpServer.SshVaultCli -- delete <name>
 
 If the name does not exist, the CLI returns a non-zero exit code.
 
+## SSH profiles
+
+Profiles are the user-facing mapping between a human/account, the host, and the credential reference. The vault stores the encrypted secret; the profile stores the SSH login shape.
+
+Use the profile commands to add or update that mapping:
+
+```text
+dotnet run --project .\tools\McpServer.SshVaultCli -- profile upsert root --host 173.255.205.169 --username root --password-vault-item root --working-directory /root --host-key-sha256 SHA256:Q7mMEDNG2w/v+PBa0ogNmW3ECGDGapU2NFgKRX5/5yI --allow-sudo-command true --allow-all-commands true
+```
+
+Useful commands:
+
+- `profile list` shows the available SSH profiles.
+- `profile show <name>` prints one profile as readable JSON.
+- `profile upsert <name>` creates or updates a profile.
+- `profile link <name>` updates the credential reference on an existing profile.
+- `profile unlink <name>` clears the credential references on an existing profile.
+- `profile delete <name>` removes a profile.
+- `vault add <name>` adds or updates the encrypted secret for a profile.
+- `vault verify <name>` confirms the stored secret decrypts correctly.
+- `vault delete <name>` removes the encrypted secret.
+
+The important field is `passwordVaultItemName` or `privateKeyPassphraseVaultItemName`. Those link the profile to a named vault entry.
+
 ## Live SSH integration test
 
 To exercise the real SSH login path against the repo-local profile and vault, set:
@@ -189,6 +234,7 @@ Keep privileged access explicit.
 
 - Use a separate profile for admin workflows, for example `dev-admin`.
 - Set `AllowSudoCommand=true` only on that explicit privileged profile.
+- Set `AllowAllCommands=true` only when the profile is intentionally unrestricted, such as a trusted root admin profile.
 - Keep the default profile narrow.
 
 That way a user with sudo can still administer a server, but the privilege boundary is obvious and auditable.

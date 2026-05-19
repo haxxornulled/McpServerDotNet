@@ -13,16 +13,7 @@ public sealed class ResourceReadRouter(IEnumerable<IResourceHandler> handlers)
 
     public ListResourcesResult ListResources() =>
         new(
-            Resources: _byScheme.Values
-                .Select(x => x.Describe())
-                .Select(d => new ResourceDto(
-                    d.Name,
-                    d.Title,
-                    d.Uri,
-                    d.Description,
-                    d.MimeType,
-                    d.Size))
-                .ToArray(),
+            Resources: BuildResourceDtos(),
             NextCursor: null);
 
     public async ValueTask<Fin<ReadResourceResultDto>> RouteAsync(string uri, CancellationToken ct)
@@ -43,13 +34,34 @@ public sealed class ResourceReadRouter(IEnumerable<IResourceHandler> handlers)
 
     private static ReadResourceResultDto ToDto(ReadResourceResult result)
     {
-        var contents = System.Linq.Enumerable
-            .Select<ResourceContent, object>(result.Contents, x =>
-                x.Text is not null
-                    ? new TextResourceContentsDto(x.Uri, x.MimeType, x.Text)
-                    : new BlobResourceContentsDto(x.Uri, x.MimeType, x.BlobBase64 ?? string.Empty))
-            .ToArray();
+        var contents = new object[result.Contents.Count];
+        for (var i = 0; i < result.Contents.Count; i++)
+        {
+            var item = result.Contents[i];
+            contents[i] = item.Text is not null
+                ? new TextResourceContentsDto(item.Uri, item.MimeType, item.Text)
+                : new BlobResourceContentsDto(item.Uri, item.MimeType, item.BlobBase64 ?? string.Empty);
+        }
 
         return new ReadResourceResultDto(contents);
+    }
+
+    private ResourceDto[] BuildResourceDtos()
+    {
+        var resources = new ResourceDto[_byScheme.Count];
+        var index = 0;
+        foreach (var resource in _byScheme.Values)
+        {
+            var descriptor = resource.Describe();
+            resources[index++] = new ResourceDto(
+                descriptor.Name,
+                descriptor.Title,
+                descriptor.Uri,
+                descriptor.Description,
+                descriptor.MimeType,
+                descriptor.Size);
+        }
+
+        return resources;
     }
 }

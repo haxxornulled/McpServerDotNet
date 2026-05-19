@@ -14,29 +14,5 @@
   <ItemGroup>
     <ProjectReference Include="..\McpServer.Domain\McpServer.Domain.csproj" />
   </ItemGroup>
-    <ItemGroup>
-    <Compile Remove="Abstractions\Error.cs" />
-    <Compile Remove="Abstractions\Fin.cs" />
-    <Compile Remove="Abstractions\FinExtensions.cs" />
-    <Compile Remove="Abstractions\IFileSystemService.cs" />
-    <Compile Remove="Abstractions\ISshService.cs" />
-    <Compile Remove="Abstractions\IToolHandler.cs" />
-    <Compile Remove="Abstractions\Mcp\IToolHandler`1.cs" />
-    <Compile Remove="Abstractions\Mcp\IToolRegistry.cs" />
-    <Compile Remove="DependencyInjection\**\*.cs" />
-    <Compile Remove="Execution\ProcessExecutionService.cs" />
-    <Compile Remove="Files\FileSystemService.cs" />
-    <Compile Remove="Files\IFileSystemService.cs" />
-    <Compile Remove="Files\Results\DirectoryEntry.cs" />
-    <Compile Remove="Files\Results\FileResults.cs" />
-    <Compile Remove="Mcp\ToolRegistry.cs" />
-    <Compile Remove="Mcp\Tools\ExecRunProcessToolHandler.cs" />
-    <Compile Remove="Mcp\Tools\SshExecToolHandler.cs" />
-    <Compile Remove="Mcp\Tools\WebFetchToolHandler.cs" />
-    <Compile Remove="Ssh\ISshService.cs" />
-    <Compile Remove="Ssh\SshService.cs" />
-    <Compile Remove="Services\**\*.cs" />
-    <Compile Remove="Tools\**\*.cs" />
-  </ItemGroup>
 
 </Project>

@@ -5,6 +5,8 @@
   <ItemGroup>
     <PackageReference Include="Serilog" />
     <PackageReference Include="Serilog.Sinks.Console" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\McpServer.Infrastructure\McpServer.Infrastructure.csproj" />

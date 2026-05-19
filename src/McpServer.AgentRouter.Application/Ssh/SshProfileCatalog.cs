@@ -8,13 +8,13 @@ public sealed class SshProfileCatalog
     /// <summary>
     /// Gets or sets the profile map keyed by profile name.
     /// </summary>
-    public IDictionary<string, SshProfileDefinition> Profiles { get; set; } =
+    public IReadOnlyDictionary<string, SshProfileDefinition> Profiles { get; set; } =
         new Dictionary<string, SshProfileDefinition>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Gets or sets the source load status entries.
     /// </summary>
-    public IList<SshProfileSourceStatus> Sources { get; set; } =
+    public IReadOnlyList<SshProfileSourceStatus> Sources { get; set; } =
         new List<SshProfileSourceStatus>();
 }
 
@@ -71,22 +71,27 @@ public sealed class SshProfileDefinition
     /// <summary>
     /// Gets or sets the allowed commands.
     /// </summary>
-    public IList<string> AllowedCommands { get; set; } = new List<string>();
+    public IReadOnlyList<string> AllowedCommands { get; set; } = Array.Empty<string>();
 
     /// <summary>
     /// Gets or sets the denied commands.
     /// </summary>
-    public IList<string> DeniedCommands { get; set; } = new List<string>();
+    public IReadOnlyList<string> DeniedCommands { get; set; } = Array.Empty<string>();
 
     /// <summary>
     /// Gets or sets the allowed remote path prefixes.
     /// </summary>
-    public IList<string> AllowedRemotePathPrefixes { get; set; } = new List<string>();
+    public IReadOnlyList<string> AllowedRemotePathPrefixes { get; set; } = Array.Empty<string>();
 
     /// <summary>
     /// Gets or sets a value indicating whether sudo is explicitly allowed for this profile.
     /// </summary>
     public bool AllowSudoCommand { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the profile may run any command without allowlist checks.
+    /// </summary>
+    public bool AllowAllCommands { get; set; }
 }
 
 /// <summary>

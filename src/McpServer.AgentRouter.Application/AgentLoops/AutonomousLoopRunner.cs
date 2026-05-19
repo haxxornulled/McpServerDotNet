@@ -332,16 +332,24 @@ public sealed class AutonomousLoopRunner : IAutonomousLoopRunner
         var configured = new System.Collections.Generic.HashSet<string>(
             configuredCapabilities,
             StringComparer.OrdinalIgnoreCase);
+        var effective = new List<string>(normalizedRequestedCapabilities.Count);
+        for (var i = 0; i < normalizedRequestedCapabilities.Count; i++)
+        {
+            var capability = normalizedRequestedCapabilities[i];
+            if (configured.Contains(capability))
+            {
+                effective.Add(capability);
+            }
+        }
 
-        return normalizedRequestedCapabilities
-            .Where(configured.Contains)
-            .Order(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        effective.Sort(StringComparer.OrdinalIgnoreCase);
+        return effective.ToArray();
     }
 
     private static IReadOnlyList<string> NormalizeCapabilities(IEnumerable<string> capabilities)
     {
         var normalized = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var initialCapacity = capabilities is ICollection<string> collection ? collection.Count : 0;
 
         foreach (var capability in capabilities)
         {
@@ -353,9 +361,15 @@ public sealed class AutonomousLoopRunner : IAutonomousLoopRunner
             normalized.Add(capability.Trim());
         }
 
-        return normalized
-            .Order(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        var sorted = initialCapacity > 0
+            ? new List<string>(Math.Min(initialCapacity, normalized.Count))
+            : new List<string>(normalized.Count);
+        foreach (var capability in normalized)
+        {
+            sorted.Add(capability);
+        }
+        sorted.Sort(StringComparer.OrdinalIgnoreCase);
+        return sorted.ToArray();
     }
 
     private sealed record AgentLoopExecutionSettings(

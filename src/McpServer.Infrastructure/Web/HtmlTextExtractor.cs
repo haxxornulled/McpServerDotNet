@@ -44,6 +44,7 @@ public static partial class HtmlTextExtractor
         }
 
         var links = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (Match match in HrefRegex().Matches(html))
         {
@@ -55,11 +56,15 @@ public static partial class HtmlTextExtractor
 
             if (Uri.TryCreate(baseUri, href, out var resolved))
             {
-                links.Add(resolved.ToString());
+                var value = resolved.ToString();
+                if (seen.Add(value))
+                {
+                    links.Add(value);
+                }
             }
         }
 
-        return links.Distinct(StringComparer.Ordinal).ToArray();
+        return links.ToArray();
     }
 
     [GeneratedRegex(@"<script\b[^>]*>.*?</script>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled)]

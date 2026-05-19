@@ -71,11 +71,7 @@ public sealed class ShellExecutionPolicy : IShellExecutionPolicy
             return Succeed(Denied($"Command '{command}' is not in AgentRouter:ShellExecution:AllowedCommands."));
         }
 
-        var arguments = request.Arguments
-            .Where(static argument => argument is not null)
-            .Select(static argument => argument.Trim())
-            .Where(static argument => !string.IsNullOrWhiteSpace(argument))
-            .ToArray();
+        var arguments = NormalizeArguments(request.Arguments);
 
         if (!options.AllowShellInterpreterInlineCommands && IsShellInterpreter(normalizedCommand) && ContainsInlineCommand(arguments))
         {
@@ -182,20 +178,32 @@ public sealed class ShellExecutionPolicy : IShellExecutionPolicy
         string normalizedCommand,
         IEnumerable<string> allowedCommands)
     {
-        return allowedCommands
-            .Where(static command => !string.IsNullOrWhiteSpace(command))
-            .Select(static command => NormalizeCommandName(command.Trim()))
-            .Contains(normalizedCommand, StringComparer.OrdinalIgnoreCase);
+        foreach (var command in allowedCommands)
+        {
+            if (!string.IsNullOrWhiteSpace(command) &&
+                string.Equals(NormalizeCommandName(command.Trim()), normalizedCommand, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsDeniedCommand(
         string normalizedCommand,
         IEnumerable<string> deniedCommands)
     {
-        return deniedCommands
-            .Where(static command => !string.IsNullOrWhiteSpace(command))
-            .Select(static command => NormalizeCommandName(command.Trim()))
-            .Contains(normalizedCommand, StringComparer.OrdinalIgnoreCase);
+        foreach (var command in deniedCommands)
+        {
+            if (!string.IsNullOrWhiteSpace(command) &&
+                string.Equals(NormalizeCommandName(command.Trim()), normalizedCommand, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsShellInterpreter(string normalizedCommand)
@@ -207,7 +215,36 @@ public sealed class ShellExecutionPolicy : IShellExecutionPolicy
 
     private static bool ContainsInlineCommand(IEnumerable<string> arguments)
     {
-        return arguments.Any(argument => InlineCommandSwitches.Contains(argument, StringComparer.OrdinalIgnoreCase));
+        foreach (var argument in arguments)
+        {
+            for (var i = 0; i < InlineCommandSwitches.Length; i++)
+            {
+                if (string.Equals(argument, InlineCommandSwitches[i], StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static string[] NormalizeArguments(IEnumerable<string?> arguments)
+    {
+        var normalized = arguments is ICollection<string?> collection
+            ? new List<string>(collection.Count)
+            : new List<string>();
+        foreach (var argument in arguments)
+        {
+            if (string.IsNullOrWhiteSpace(argument))
+            {
+                continue;
+            }
+
+            normalized.Add(argument.Trim());
+        }
+
+        return normalized.ToArray();
     }
 
     private static ShellExecutionPolicyDecision Denied(string reason)

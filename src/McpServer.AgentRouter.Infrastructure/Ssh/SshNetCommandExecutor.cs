@@ -57,7 +57,7 @@ public sealed class SshNetCommandExecutor : ISshCommandExecutor
             {
                 try
                 {
-                    return await Task.Run(() => ExecuteSshCommand(command, attempt.ConnectionInfo, cancellationToken), cancellationToken)
+                    return await ExecuteSshCommandAsync(command, attempt.ConnectionInfo, cancellationToken)
                         .ConfigureAwait(false);
                 }
                 catch (SshAuthenticationException ex)
@@ -112,7 +112,7 @@ public sealed class SshNetCommandExecutor : ISshCommandExecutor
         }
     }
 
-    private SshCommandExecutionResult ExecuteSshCommand(
+    private async Task<SshCommandExecutionResult> ExecuteSshCommandAsync(
         SshExecutionCommand command,
         ConnectionInfo connectionInfo,
         CancellationToken cancellationToken)
@@ -124,7 +124,7 @@ public sealed class SshNetCommandExecutor : ISshCommandExecutor
         client.ConnectionInfo.Timeout = TimeSpan.FromSeconds(Math.Max(1, command.TimeoutSeconds));
         try
         {
-            client.Connect();
+            await client.ConnectAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (hostKeyValidation.WasRejected && ex is SshException)
         {
@@ -138,38 +138,47 @@ public sealed class SshNetCommandExecutor : ISshCommandExecutor
             using var sshCommand = client.CreateCommand(BuildRemoteCommand(command));
             sshCommand.CommandTimeout = TimeSpan.FromSeconds(Math.Max(1, command.TimeoutSeconds));
 
-            var stdout = sshCommand.Execute();
-            var stderr = sshCommand.Error;
+            var capture = await SshCommandStreamPump.CaptureAsync(
+                    sshCommand.OutputStream,
+                    sshCommand.ExtendedOutputStream,
+                    executeAsync: sshCommand.ExecuteAsync,
+                    command.MaxOutputChars,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
             stopwatch.Stop();
 
-            var stdoutTruncated = false;
-            var stderrTruncated = false;
-            stdout = Truncate(stdout, command.MaxOutputChars, ref stdoutTruncated);
-            stderr = Truncate(stderr, command.MaxOutputChars, ref stderrTruncated);
+            if (capture.ExecutionException is SshOperationTimeoutException timeoutException)
+            {
+                _logger.LogWarning(
+                    "SSH command via profile {Profile} timed out after {TimeoutSeconds}s.",
+                    command.ProfileName,
+                    command.TimeoutSeconds);
+
+                return new SshCommandExecutionResult
+                {
+                    ExitCode = -1,
+                    TimedOut = true,
+                    Stdout = capture.StandardOutput,
+                    Stderr = string.IsNullOrWhiteSpace(capture.StandardError) ? timeoutException.Message : capture.StandardError,
+                    StdoutTruncated = capture.StdoutTruncated,
+                    StderrTruncated = capture.StderrTruncated,
+                    ElapsedMilliseconds = stopwatch.ElapsedMilliseconds
+                };
+            }
+
+            if (capture.ExecutionException is not null)
+            {
+                throw capture.ExecutionException;
+            }
 
             return new SshCommandExecutionResult
             {
                 ExitCode = sshCommand.ExitStatus.GetValueOrDefault(-1),
-                Stdout = stdout,
-                Stderr = stderr,
-                StdoutTruncated = stdoutTruncated,
-                StderrTruncated = stderrTruncated,
-                ElapsedMilliseconds = stopwatch.ElapsedMilliseconds
-            };
-        }
-        catch (SshOperationTimeoutException ex)
-        {
-            stopwatch.Stop();
-            _logger.LogWarning(
-                "SSH command via profile {Profile} timed out after {TimeoutSeconds}s.",
-                command.ProfileName,
-                command.TimeoutSeconds);
-
-            return new SshCommandExecutionResult
-            {
-                ExitCode = -1,
-                TimedOut = true,
-                Stderr = ex.Message,
+                Stdout = capture.StandardOutput,
+                Stderr = capture.StandardError,
+                StdoutTruncated = capture.StdoutTruncated,
+                StderrTruncated = capture.StderrTruncated,
                 ElapsedMilliseconds = stopwatch.ElapsedMilliseconds
             };
         }
@@ -224,7 +233,7 @@ public sealed class SshNetCommandExecutor : ISshCommandExecutor
                 : new PrivateKeyFile(privateKeyPath, passphrase);
 
             attempts.Add(new SshConnectionAttempt(
-                CreateConnectionInfo(command, [new PrivateKeyAuthenticationMethod(command.Username, privateKey)]),
+                CreateConnectionInfo(command, new[] { new PrivateKeyAuthenticationMethod(command.Username, privateKey) }),
                 "private-key"));
         }
 
@@ -232,10 +241,10 @@ public sealed class SshNetCommandExecutor : ISshCommandExecutor
         {
             var password = ResolveRequiredVaultSecret(command.PasswordVaultItemName, "password");
             attempts.Add(new SshConnectionAttempt(
-                CreateConnectionInfo(command, [CreateKeyboardInteractiveAuthenticationMethod(command.Username, password)]),
+                CreateConnectionInfo(command, new[] { CreateKeyboardInteractiveAuthenticationMethod(command.Username, password) }),
                 "keyboard-interactive"));
             attempts.Add(new SshConnectionAttempt(
-                CreateConnectionInfo(command, [CreatePasswordAuthenticationMethod(command.Username, password)]),
+                CreateConnectionInfo(command, new[] { CreatePasswordAuthenticationMethod(command.Username, password) }),
                 "password"));
         }
 
@@ -250,12 +259,12 @@ public sealed class SshNetCommandExecutor : ISshCommandExecutor
 
     private static ConnectionInfo CreateConnectionInfo(
         SshExecutionCommand command,
-        IEnumerable<AuthenticationMethod> authMethods) =>
+        AuthenticationMethod[] authMethods) =>
         new(
             command.Host,
             command.Port <= 0 ? 22 : command.Port,
             command.Username,
-            authMethods.ToArray());
+            authMethods);
 
     private string ResolveRequiredVaultSecret(string? itemName, string purpose)
     {
@@ -346,17 +355,22 @@ public sealed class SshNetCommandExecutor : ISshCommandExecutor
 
     private static string BuildRemoteCommand(SshExecutionCommand command)
     {
-        var executableAndArguments = new List<string>
+        var builder = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(command.WorkingDirectory))
         {
-            QuoteForPosixShell(command.Command)
-        };
+            builder.Append("cd ");
+            AppendQuotedPosix(builder, command.WorkingDirectory);
+            builder.Append(" && ");
+        }
 
-        executableAndArguments.AddRange(command.Arguments.Select(QuoteForPosixShell));
-        var commandLine = string.Join(" ", executableAndArguments);
+        builder.Append(QuoteForPosixShell(command.Command));
+        for (var index = 0; index < command.Arguments.Count; index++)
+        {
+            builder.Append(' ');
+            builder.Append(QuoteForPosixShell(command.Arguments[index]));
+        }
 
-        return string.IsNullOrWhiteSpace(command.WorkingDirectory)
-            ? commandLine
-            : $"cd {QuoteForPosixShell(command.WorkingDirectory)} && {commandLine}";
+        return builder.ToString();
     }
 
     private static string QuoteForPosixShell(string value)
@@ -367,6 +381,13 @@ public sealed class SshNetCommandExecutor : ISshCommandExecutor
         }
 
         return "'" + value.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
+    }
+
+    private static void AppendQuotedPosix(StringBuilder builder, string value)
+    {
+        builder.Append('\'');
+        builder.Append(value.Replace("'", "'\\''", StringComparison.Ordinal));
+        builder.Append('\'');
     }
 
     private sealed record SshConnectionAttempt(

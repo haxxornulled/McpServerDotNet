@@ -115,6 +115,25 @@ public sealed class SshExecutionPolicyTests
     }
 
     [Fact]
+    public async Task EvaluateAsync_AllowsAnyCommand_When_Profile_Opts_In()
+    {
+        var policy = CreatePolicy(allowAllCommands: true);
+
+        var result = await policy.EvaluateAsync(new SshExecutionRequest
+        {
+            Profile = "dev",
+            Command = "ps"
+        }, CancellationToken.None);
+
+        Assert.True(result.IsSucc);
+        result.IfSucc(decision =>
+        {
+            Assert.True(decision.Allowed);
+            Assert.Equal("ps", decision.ResolvedCommand);
+        });
+    }
+
+    [Fact]
     public async Task EvaluateAsync_AllowsSudo_When_Profile_Opts_In()
     {
         var policy = CreatePolicy(allowedCommands: ["whoami"], allowSudoCommand: true);
@@ -158,7 +177,10 @@ public sealed class SshExecutionPolicyTests
         });
     }
 
-    private static SshExecutionPolicy CreatePolicy(IList<string>? allowedCommands = null, bool allowSudoCommand = false)
+    private static SshExecutionPolicy CreatePolicy(
+        IList<string>? allowedCommands = null,
+        bool allowSudoCommand = false,
+        bool allowAllCommands = false)
     {
         var profiles = new Dictionary<string, SshProfileDefinition>(StringComparer.OrdinalIgnoreCase)
         {
@@ -169,10 +191,11 @@ public sealed class SshExecutionPolicyTests
                 Username = "tester",
                 PasswordVaultItemName = "dev",
                 WorkingDirectory = "/tmp",
-                AllowedCommands = allowedCommands ?? new List<string> { "pwd", "whoami" },
+                AllowedCommands = allowedCommands is null ? ["pwd", "whoami"] : allowedCommands.ToArray(),
                 DeniedCommands = ["rm"],
                 AllowedRemotePathPrefixes = ["/tmp"],
-                AllowSudoCommand = allowSudoCommand
+                AllowSudoCommand = allowSudoCommand,
+                AllowAllCommands = allowAllCommands
             }
         };
 

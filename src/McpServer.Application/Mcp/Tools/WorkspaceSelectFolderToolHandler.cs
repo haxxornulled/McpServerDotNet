@@ -1,17 +1,18 @@
 using System.Text.Json;
 using LanguageExt;
 using McpServer.Application.Abstractions.Files;
+using McpServer.Application.Files;
 using McpServer.Application.Files.Commands;
+using McpServer.Application.Files.Results;
 using McpServer.Application.Mcp.Tools;
 using McpServer.Application.Mcp.Validation;
-using McpServer.Domain.Workspace;
 using Microsoft.Extensions.Logging;
 
 namespace McpServer.Application.Mcp.Tools;
 
 public sealed class WorkspaceSelectFolderToolHandler(
     IFileSystemService fileSystemService,
-    McpServer.Domain.Workspace.IWorkspaceMutationService workspaceMutationService,
+    IWorkspaceMutationService workspaceMutationService,
     IPathPolicy pathPolicy,
     ILogger<WorkspaceSelectFolderToolHandler> logger) : IToolHandler<WorkspaceSelectFolderRequest>
 {
@@ -91,7 +92,7 @@ public sealed class WorkspaceSelectFolderToolHandler(
                 currentProjectRoot,
                 browsePath,
                 projectRootChanged,
-                folders);
+                BuildFolderOptions(result.Entries, result.Path));
 
             logger.LogInformation(
                 "Tool {ToolName} completed for browse path {BrowsePath} project root changed {ProjectRootChanged}",
@@ -126,4 +127,24 @@ public sealed class WorkspaceSelectFolderToolHandler(
         failure.Match<Fin<CallToolResult>>(
             Succ: _ => throw new InvalidOperationException("Expected failure while propagating result."),
             Fail: error => error);
+
+    private static WorkspaceFolderOption[] BuildFolderOptions(
+        IReadOnlyList<DirectoryEntry> entries,
+        string basePath)
+    {
+        var folders = new List<WorkspaceFolderOption>(entries.Count);
+        for (var i = 0; i < entries.Count; i++)
+        {
+            if (!entries[i].IsDirectory)
+            {
+                continue;
+            }
+
+            folders.Add(new WorkspaceFolderOption(
+                entries[i].Name,
+                Path.GetFullPath(Path.Combine(basePath, entries[i].Name))));
+        }
+
+        return folders.ToArray();
+    }
 }

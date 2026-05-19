@@ -29,7 +29,12 @@ public sealed class ActivityProfileRegistry : IActivityProfileRegistry
         _profiles = profiles.ToDictionary(static profile => profile.Activity);
     }
 
-    public IReadOnlyList<ActivityProfileDto> ListProfiles() => _profiles.Values.OrderBy(static x => x.Activity).ToArray();
+    public IReadOnlyList<ActivityProfileDto> ListProfiles()
+    {
+        var values = _profiles.Values.ToArray();
+        Array.Sort(values, static (left, right) => left.Activity.CompareTo(right.Activity));
+        return values;
+    }
 
     public Fin<ActivityProfileDto> GetProfile(ActivityKind activity) =>
         _profiles.TryGetValue(activity, out var profile)

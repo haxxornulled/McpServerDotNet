@@ -17,24 +17,43 @@ public sealed class ToolCallRouter
     public ToolCallRouter(IEnumerable<IToolHandler> handlers, ILogger<ToolCallRouter> logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-
-        var handlerArray = handlers
-            .OrderBy(static handler => handler.Name, StringComparer.Ordinal)
-            .ToArray();
-
-        var duplicateNames = handlerArray
-            .GroupBy(static handler => handler.Name, StringComparer.Ordinal)
-            .Where(static group => group.Count() > 1)
-            .Select(static group => group.Key)
-            .ToArray();
-
-        if (duplicateNames.Length > 0)
+        var handlerList = new List<IToolHandler>();
+        var seen = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var handler in handlers)
         {
+            handlerList.Add(handler);
+            if (seen.TryGetValue(handler.Name, out var count))
+            {
+                seen[handler.Name] = count + 1;
+            }
+            else
+            {
+                seen[handler.Name] = 1;
+            }
+        }
+
+        var duplicateNames = new List<string>();
+        foreach (var pair in seen)
+        {
+            if (pair.Value > 1)
+            {
+                duplicateNames.Add(pair.Key);
+            }
+        }
+
+        if (duplicateNames.Count > 0)
+        {
+            duplicateNames.Sort(StringComparer.Ordinal);
             throw new InvalidOperationException($"Duplicate MCP tool names are registered: {string.Join(", ", duplicateNames)}");
         }
 
-        _handlers = handlerArray.ToDictionary(static handler => handler.Name, StringComparer.Ordinal);
-        _tools = handlerArray.Select(ToToolDto).ToArray();
+        handlerList.Sort(static (left, right) => string.Compare(left.Name, right.Name, StringComparison.Ordinal));
+        _handlers = handlerList.ToDictionary(static handler => handler.Name, StringComparer.Ordinal);
+        _tools = new ToolDto[handlerList.Count];
+        for (var i = 0; i < handlerList.Count; i++)
+        {
+            _tools[i] = ToToolDto(handlerList[i]);
+        }
     }
 
     public ListToolsResult ListTools()
@@ -77,9 +96,20 @@ public sealed class ToolCallRouter
 
     private static CallToolResultDto ToCallToolDto(CallToolResult result) =>
         new(
-            Content: result.Content.Select(x => TextContentDto.Create(x.Text)).ToArray(),
+            Content: ToTextContentArray(result.Content),
             StructuredContent: result.StructuredContent,
             IsError: result.IsError);
+
+    private static TextContentDto[] ToTextContentArray(IReadOnlyList<ContentItem> content)
+    {
+        var items = new TextContentDto[content.Count];
+        for (var i = 0; i < content.Count; i++)
+        {
+            items[i] = TextContentDto.Create(content[i].Text);
+        }
+
+        return items;
+    }
 
     private static Fin<CallToolResultDto> ToToolErrorDto(string toolName, string errorCode, string message)
     {

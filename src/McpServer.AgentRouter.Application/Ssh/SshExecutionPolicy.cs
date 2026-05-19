@@ -93,19 +93,48 @@ public sealed class SshExecutionPolicy : ISshExecutionPolicy
             return Succeed(Denied("command must be an executable name, not a path."));
         }
 
-        var arguments = parsedCommand.Arguments
-            .Concat(request.Arguments
-                .Where(static argument => argument is not null)
-                .Select(static argument => argument.Trim())
-                .Where(static argument => !string.IsNullOrWhiteSpace(argument)))
-            .ToArray();
+        var arguments = BuildArguments(parsedCommand.Arguments, request.Arguments);
 
         var normalizedCommand = NormalizeCommandName(command);
-        var sudoAllowed = IsSudoCommand(normalizedCommand) && profile.AllowSudoCommand;
-        var deniedCommands = options.DeniedCommands.Concat(profile.DeniedCommands);
-        if (!sudoAllowed && IsDeniedCommand(normalizedCommand, deniedCommands))
+        var allowAllCommands = profile.AllowAllCommands;
+        var workingDirectory = string.IsNullOrWhiteSpace(request.WorkingDirectory)
+            ? profile.WorkingDirectory ?? string.Empty
+            : request.WorkingDirectory.Trim();
+
+        var timeoutSeconds = request.TimeoutSeconds is null
+            ? options.TimeoutSeconds
+            : Math.Min(Math.Max(1, request.TimeoutSeconds.Value), Math.Max(1, options.TimeoutSeconds));
+
+        var port = profile.Port <= 0 ? 22 : profile.Port;
+
+        var sudoAllowed = IsSudoCommand(normalizedCommand) && (profile.AllowSudoCommand || allowAllCommands);
+        var deniedCommands = BuildMergedStrings(options.DeniedCommands, profile.DeniedCommands);
+        if (!allowAllCommands && !sudoAllowed && IsDeniedCommand(normalizedCommand, deniedCommands))
         {
             return Succeed(Denied($"Command '{command}' is explicitly denied."));
+        }
+
+        if (allowAllCommands)
+        {
+            return Succeed(new SshExecutionPolicyDecision
+            {
+                Allowed = true,
+                Decision = "allowed",
+                ProfileName = profileName,
+                Host = profile.Host.Trim(),
+                Port = port,
+                Username = profile.Username.Trim(),
+                ResolvedCommand = command,
+                ResolvedArguments = arguments,
+                WorkingDirectory = workingDirectory,
+                TimeoutSeconds = timeoutSeconds,
+                MaxOutputChars = Math.Max(1, options.MaxOutputChars),
+                PasswordVaultItemName = profile.PasswordVaultItemName,
+                PrivateKeyPath = profile.PrivateKeyPath,
+                PrivateKeyPassphraseVaultItemName = profile.PrivateKeyPassphraseVaultItemName,
+                HostKeySha256 = profile.HostKeySha256,
+                AcceptUnknownHostKey = profile.AcceptUnknownHostKey || options.AllowUnknownHostKeys
+            });
         }
 
         IEnumerable<string> allowedCommands = profile.AllowedCommands.Count > 0
@@ -122,20 +151,10 @@ public sealed class SshExecutionPolicy : ISshExecutionPolicy
             return Succeed(Denied($"Command '{command}' cannot use inline command switches until argument-aware SSH shell policy is enabled."));
         }
 
-        var workingDirectory = string.IsNullOrWhiteSpace(request.WorkingDirectory)
-            ? profile.WorkingDirectory ?? string.Empty
-            : request.WorkingDirectory.Trim();
-
         if (!IsAllowedRemoteWorkingDirectory(workingDirectory, profile.AllowedRemotePathPrefixes))
         {
             return Succeed(Denied($"Remote working directory '{workingDirectory}' is not allowed for SSH profile '{profileName}'."));
         }
-
-        var timeoutSeconds = request.TimeoutSeconds is null
-            ? options.TimeoutSeconds
-            : Math.Min(Math.Max(1, request.TimeoutSeconds.Value), Math.Max(1, options.TimeoutSeconds));
-
-        var port = profile.Port <= 0 ? 22 : profile.Port;
 
         return Succeed(new SshExecutionPolicyDecision
         {
@@ -174,17 +193,16 @@ public sealed class SshExecutionPolicy : ISshExecutionPolicy
             return new ParsedCommand(parts[0], Array.Empty<string>());
         }
 
-        return new ParsedCommand(parts[0], parts.Skip(1).ToArray());
+        var arguments = new string[parts.Length - 1];
+        Array.Copy(parts, 1, arguments, 0, arguments.Length);
+        return new ParsedCommand(parts[0], arguments);
     }
 
     private static bool IsAllowedRemoteWorkingDirectory(
         string workingDirectory,
         IEnumerable<string> allowedPrefixes)
     {
-        var prefixes = allowedPrefixes
-            .Where(static prefix => !string.IsNullOrWhiteSpace(prefix))
-            .Select(static prefix => NormalizeRemotePath(prefix.Trim()))
-            .ToArray();
+        var prefixes = NormalizeStrings(allowedPrefixes);
 
         if (prefixes.Length == 0 || string.IsNullOrWhiteSpace(workingDirectory))
         {
@@ -192,9 +210,16 @@ public sealed class SshExecutionPolicy : ISshExecutionPolicy
         }
 
         var normalized = NormalizeRemotePath(workingDirectory);
-        return prefixes.Any(prefix =>
-            normalized.Equals(prefix, StringComparison.Ordinal) ||
-            normalized.StartsWith(prefix.EndsWith("/", StringComparison.Ordinal) ? prefix : prefix + "/", StringComparison.Ordinal));
+        foreach (var prefix in prefixes)
+        {
+            if (normalized.Equals(prefix, StringComparison.Ordinal) ||
+                normalized.StartsWith(prefix.EndsWith("/", StringComparison.Ordinal) ? prefix : prefix + "/", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string NormalizeRemotePath(string value)
@@ -227,20 +252,32 @@ public sealed class SshExecutionPolicy : ISshExecutionPolicy
         string normalizedCommand,
         IEnumerable<string> allowedCommands)
     {
-        return allowedCommands
-            .Where(static command => !string.IsNullOrWhiteSpace(command))
-            .Select(static command => NormalizeCommandName(command.Trim()))
-            .Contains(normalizedCommand, StringComparer.OrdinalIgnoreCase);
+        foreach (var command in allowedCommands)
+        {
+            if (!string.IsNullOrWhiteSpace(command) &&
+                string.Equals(NormalizeCommandName(command.Trim()), normalizedCommand, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsDeniedCommand(
         string normalizedCommand,
         IEnumerable<string> deniedCommands)
     {
-        return deniedCommands
-            .Where(static command => !string.IsNullOrWhiteSpace(command))
-            .Select(static command => NormalizeCommandName(command.Trim()))
-            .Contains(normalizedCommand, StringComparer.OrdinalIgnoreCase);
+        foreach (var command in deniedCommands)
+        {
+            if (!string.IsNullOrWhiteSpace(command) &&
+                string.Equals(NormalizeCommandName(command.Trim()), normalizedCommand, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool IsShellInterpreter(string normalizedCommand)
@@ -255,7 +292,18 @@ public sealed class SshExecutionPolicy : ISshExecutionPolicy
 
     private static bool ContainsInlineCommand(IEnumerable<string> arguments)
     {
-        return arguments.Any(argument => InlineCommandSwitches.Contains(argument, StringComparer.OrdinalIgnoreCase));
+        foreach (var argument in arguments)
+        {
+            for (var i = 0; i < InlineCommandSwitches.Length; i++)
+            {
+                if (string.Equals(argument, InlineCommandSwitches[i], StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static SshExecutionPolicyDecision Denied(string reason)
@@ -271,6 +319,55 @@ public sealed class SshExecutionPolicy : ISshExecutionPolicy
     private static Fin<SshExecutionPolicyDecision> Succeed(SshExecutionPolicyDecision decision)
     {
         return Fin<SshExecutionPolicyDecision>.Succ(decision);
+    }
+
+    private static string[] BuildArguments(IReadOnlyList<string> parsedArguments, IEnumerable<string?> requestArguments)
+    {
+        var buffer = new List<string>();
+
+        for (var i = 0; i < parsedArguments.Count; i++)
+        {
+            if (!string.IsNullOrWhiteSpace(parsedArguments[i]))
+            {
+                buffer.Add(parsedArguments[i]);
+            }
+        }
+
+        foreach (var argument in requestArguments)
+        {
+            if (!string.IsNullOrWhiteSpace(argument))
+            {
+                buffer.Add(argument.Trim());
+            }
+        }
+
+        return buffer.ToArray();
+    }
+
+    private static string[] BuildMergedStrings(IEnumerable<string> first, IEnumerable<string> second)
+    {
+        var values = new List<string>();
+        AppendStrings(values, first);
+        AppendStrings(values, second);
+        return values.ToArray();
+    }
+
+    private static string[] NormalizeStrings(IEnumerable<string> values)
+    {
+        var list = new List<string>();
+        AppendStrings(list, values);
+        return list.ToArray();
+    }
+
+    private static void AppendStrings(List<string> target, IEnumerable<string> values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                target.Add(NormalizeRemotePath(value.Trim()));
+            }
+        }
     }
 
     private sealed record ParsedCommand(string Command, IReadOnlyList<string> Arguments);

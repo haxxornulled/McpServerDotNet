@@ -395,13 +395,16 @@ public sealed class StdioMcpToolCatalogClient : IMcpToolCatalogClient
                 return Error.New("MCP tools/list response did not contain result.");
             }
 
+            var tools = new List<McpToolCatalogItem>();
+
             var snapshot = new McpToolCatalogSnapshot
             {
                 Transport = "stdio",
                 ProtocolVersion = GetOptionalString(initializeResult, "protocolVersion") ?? string.Empty,
                 ServerName = string.Empty,
                 ServerVersion = string.Empty,
-                ElapsedMilliseconds = elapsedMilliseconds
+                ElapsedMilliseconds = elapsedMilliseconds,
+                Tools = tools
             };
 
             if (initializeResult.TryGetProperty("serverInfo", out var serverInfo))
@@ -429,7 +432,7 @@ public sealed class StdioMcpToolCatalogClient : IMcpToolCatalogClient
                         inputSchema = inputSchemaElement.Clone();
                     }
 
-                    snapshot.Tools.Add(new McpToolCatalogItem
+                    tools.Add(new McpToolCatalogItem
                     {
                         Name = name,
                         Title = GetOptionalString(toolElement, "title"),

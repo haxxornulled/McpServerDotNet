@@ -126,6 +126,7 @@ public sealed class SshProfileOptions
     ];
     public string[] AllowedRemotePathPrefixes { get; init; } = [];
     public bool AllowSudoCommand { get; init; }
+    public bool AllowAllCommands { get; init; }
 }
 
 

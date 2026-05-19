@@ -18,7 +18,8 @@
       "allowedRemotePathPrefixes": [
         "/tmp",
         "/home/deploy"
-      ]
+      ],
+      "allowAllCommands": false
     },
     "dev-admin": {
       "host": "192.168.1.50",
@@ -41,7 +42,8 @@
         "/etc",
         "/var/log"
       ],
-      "allowSudoCommand": true
+      "allowSudoCommand": true,
+      "allowAllCommands": false
     }
   }
 }

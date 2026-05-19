@@ -201,13 +201,19 @@ public sealed class TestSshService(
         }
 
         var executable = ExtractExecutableName(command.Command);
-        var sudoAllowed = IsSudoCommand(executable) && profile.AllowSudoCommand;
+        var allowAllCommands = profile.AllowAllCommands;
+        var sudoAllowed = IsSudoCommand(executable) && (profile.AllowSudoCommand || allowAllCommands);
         var deniedCommands = new System.Collections.Generic.HashSet<string>(
             profile.DeniedCommands.Where(static value => !string.IsNullOrWhiteSpace(value)),
             StringComparer.OrdinalIgnoreCase);
-        if (!sudoAllowed && deniedCommands.Contains(executable))
+        if (!allowAllCommands && !sudoAllowed && deniedCommands.Contains(executable))
         {
             return Error.New($"SSH command '{executable}' is denied by profile '{profile.Name}'.");
+        }
+
+        if (allowAllCommands)
+        {
+            return LanguageExt.Prelude.unit;
         }
 
         var allowedCommands = new System.Collections.Generic.HashSet<string>(
