@@ -22,5 +22,6 @@
     <ProjectReference Include="..\..\src\McpServer.AgentRouter.Infrastructure\McpServer.AgentRouter.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\McpServer.AgentRouter.Domain\McpServer.AgentRouter.Domain.csproj" />
     <ProjectReference Include="..\..\src\McpServer.AgentRouter.Host\McpServer.AgentRouter.Host.csproj" />
+    <ProjectReference Include="..\..\tools\McpServer.AgentRouter.Tools\McpServer.AgentRouter.Tools.csproj" />
   </ItemGroup>
 </Project>

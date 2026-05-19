@@ -165,12 +165,19 @@ The repo ignores `config/mcpserver/*.local.json`. Keep templates or examples che
 | Command | Purpose | When to use |
 | --- | --- | --- |
 | `dotnet run --project .\tools\McpServer.AgentRouter.Tools -- verify` | Restore, build, and test the repo in the supported C# CLI path. | Use for the default repo validation pass. |
+| `dotnet run --project .\tools\McpServer.AgentRouter.Tools -- chat --prompt "Say hello"` | Open a chat console against the local router or send a one-shot prompt. | Use when you want to inspect raw model output from Ollama or LM Studio through AgentRouter. |
+| `dotnet run --project .\tools\McpServer.AgentRouter.Tools -- chat --prompt-file .\prompts\hello.txt --transcript .\transcripts\hello.json` | Run chat from a file and save a JSON transcript. | Use when you want repeatable prompts or a durable conversation record. |
 | `dotnet run --project .\tools\McpServer.AgentRouter.Tools -- smoke` | Run the higher-fidelity AgentRouter runtime harness. | Use when you want end-to-end runtime validation beyond build/test. |
 | `dotnet run --project .\tools\McpServer.AgentRouter.Tools -- stress` | Run the AgentRouter stress harness. | Use for repeatable workload and response-shape checks. |
 | `dotnet run --project .\tools\McpServer.AgentRouter.Tools -- provider-unavailable` | Probe the provider-failure path. | Use when validating fallback and error handling. |
 | `cmd.exe /c "set MCPSERVER_INTEGRATION_LIVE_SSH=1&& dotnet test .\tests\McpServer.IntegrationTests\McpServer.IntegrationTests.csproj -c Release --no-build --filter FullyQualifiedName~Ssh -v minimal"` | Run the live SSH integration slice against the repo-local profile and vault. | Use when you need to prove real host login and command parsing. |
 
 `verify` streams child `dotnet` output into your terminal. When SSH execution is enabled, `smoke` also echoes SSH stdout/stderr blocks back to the terminal for each request.
+
+Append `--output json` to any `tools/McpServer.AgentRouter.Tools` command when you want machine-readable results for a VS Code extension or other automation layer.
+For chat, `--output json` returns a single-turn response object with the prompt, assistant response, finish reason, and token counts.
+For longer prompts, `--prompt-file` avoids shell quoting issues, and `--transcript` writes a durable JSON record of the session.
+Human chat output is rendered as a framed session card with prompt and assistant panels, and markdown/code fences are normalized so the terminal reads like a transcript instead of raw console text. Emojis are normalized to `0` in the console transcript. Live redraw only runs on ANSI-capable terminals; otherwise the final formatted panel is emitted without escape sequences.
 
 - For a real host, add the credential to the vault and point the repo-local SSH profile at `passwordVaultItemName`.
 - For admin workflows, create a separate SSH profile with `AllowSudoCommand=true` instead of broadening the default profile. Use `AllowAllCommands=true` only for intentionally unrestricted profiles such as `root`.
@@ -226,6 +233,14 @@ Chat:
 curl.exe -s http://127.0.0.1:5177/v1/chat/completions ^
   -H "Content-Type: application/json" ^
   -d "{\"model\":\"fast-local\",\"messages\":[{\"role\":\"user\",\"content\":\"Say router online in one sentence.\"}],\"stream\":false}"
+```
+
+CLI chat console:
+
+```text
+dotnet run --project .\tools\McpServer.AgentRouter.Tools -- chat --prompt "Say router online in one sentence."
+dotnet run --project .\tools\McpServer.AgentRouter.Tools -- chat --prompt "Say router online in one sentence." --output json
+dotnet run --project .\tools\McpServer.AgentRouter.Tools -- chat --prompt-file .\prompts\hello.txt --transcript .\transcripts\hello.json
 ```
 
 MCP tool call:

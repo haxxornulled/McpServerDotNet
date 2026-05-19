@@ -110,6 +110,8 @@ That typed C# harness restores, builds, and runs the full repo test suite withou
 | Command | Purpose | When to use |
 | --- | --- | --- |
 | `dotnet run --project .\tools\McpServer.AgentRouter.Tools -- verify` | Restore, build, and test the repo in the supported C# CLI path. | Use for the default repo validation pass. |
+| `dotnet run --project .\tools\McpServer.AgentRouter.Tools -- chat --prompt "Say hello"` | Open a chat console against the local router or send a one-shot prompt. | Use when you want to see the raw model response from Ollama or LM Studio through AgentRouter. |
+| `dotnet run --project .\tools\McpServer.AgentRouter.Tools -- chat --prompt-file .\prompts\hello.txt --transcript .\transcripts\hello.json` | Run chat from a file and save a durable JSON transcript. | Use when you want repeatable prompts or a record for extension/debug workflows. |
 | `dotnet run --project .\tools\McpServer.AgentRouter.Tools -- smoke` | Run the higher-fidelity AgentRouter runtime harness. | Use when you want end-to-end runtime validation beyond build/test. |
 | `dotnet run --project .\tools\McpServer.AgentRouter.Tools -- stress` | Run the AgentRouter stress harness. | Use for repeatable workload and response-shape checks. |
 | `dotnet run --project .\tools\McpServer.AgentRouter.Tools -- provider-unavailable` | Probe the provider-failure path. | Use when validating fallback and error handling. |
@@ -125,6 +127,11 @@ That typed C# harness restores, builds, and runs the full repo test suite withou
 | `cmd.exe /c "set MCPSERVER_INTEGRATION_LIVE_SSH=1&& dotnet test .\tests\McpServer.IntegrationTests\McpServer.IntegrationTests.csproj -c Release --no-build --filter FullyQualifiedName~Ssh -v minimal"` | Run the live SSH integration slice against the repo-local profile and vault. | Use when you need to prove real host login and command parsing. |
 
 `verify` streams child `dotnet` output into your terminal. When SSH execution is enabled, `smoke` also echoes SSH stdout/stderr blocks back to the terminal for each request.
+
+Add `--output json` to any `tools/McpServer.AgentRouter.Tools` or `tools/McpServer.SshVaultCli` command when you need machine-readable output for an editor extension or automation script.
+For chat, `--output json` returns a structured single-turn payload that is easy to consume from a VS Code extension.
+For longer prompts, `--prompt-file` avoids shell quoting issues, and `--transcript` writes a JSON transcript to disk.
+Human chat output is framed into a session card plus prompt and assistant panels, and markdown/code fences are rendered into a cleaner transcript instead of raw source text. Emojis are normalized to `0` in the console transcript. Live redraw only kicks in on ANSI-capable terminals; otherwise the final formatted panel is emitted safely.
 
 ## Build and test baseline
 

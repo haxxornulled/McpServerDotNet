@@ -65,16 +65,92 @@ internal sealed class CommandLineOptions
             : throw new ArgumentException($"Option --{name} must be an integer. Value was '{value}'.");
     }
 
+    public int? GetNullableInt(string name)
+    {
+        if (!_values.TryGetValue(name, out var value) || string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : throw new ArgumentException($"Option --{name} must be an integer. Value was '{value}'.");
+    }
+
+    public double? GetNullableDouble(string name)
+    {
+        if (!_values.TryGetValue(name, out var value) || string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return double.TryParse(value, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : throw new ArgumentException($"Option --{name} must be a number. Value was '{value}'.");
+    }
+
+    public bool GetBool(string name, bool defaultValue)
+    {
+        if (!_values.TryGetValue(name, out var value))
+        {
+            return defaultValue;
+        }
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return true;
+        }
+
+        if (bool.TryParse(value, out var parsed))
+        {
+            return parsed;
+        }
+
+        if (string.Equals(value, "1", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.Equals(value, "0", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        throw new ArgumentException($"Option --{name} must be true or false. Value was '{value}'.");
+    }
+
     public bool HasFlag(string name)
     {
         return _values.ContainsKey(name);
     }
+
+    public string GetOutputMode(string defaultValue = "text")
+    {
+        return GetString("output", defaultValue);
+    }
+}
+
+internal static class CliOutput
+{
+    private static bool _json;
+
+    public static void Configure(string? outputMode)
+    {
+        _json = string.Equals(outputMode, "json", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool IsJson => _json;
 }
 
 internal static class ConsoleWriter
 {
     public static void WriteSection(string name)
     {
+        if (CliOutput.IsJson)
+        {
+            return;
+        }
+
         Log.Information(string.Empty);
         Log.Information("============================================================");
         Log.Information(name);
@@ -83,16 +159,31 @@ internal static class ConsoleWriter
 
     public static void WritePass(string message)
     {
+        if (CliOutput.IsJson)
+        {
+            return;
+        }
+
         Log.Information("[PASS] {Message}", message);
     }
 
     public static void WriteInfo(string message)
     {
+        if (CliOutput.IsJson)
+        {
+            return;
+        }
+
         Log.Information("[INFO] {Message}", message);
     }
 
     public static void WriteWarning(string message)
     {
+        if (CliOutput.IsJson)
+        {
+            return;
+        }
+
         Log.Warning("[WARN] {Message}", message);
     }
 
@@ -109,6 +200,7 @@ internal static class HelpWriter
         Console.WriteLine("MCPServer AgentRouter Tools");
         Console.WriteLine();
         Console.WriteLine("Usage:");
+        Console.WriteLine("  dotnet run --project tools/McpServer.AgentRouter.Tools -- chat [options]");
         Console.WriteLine("  dotnet run --project tools/McpServer.AgentRouter.Tools -- install-local-clients [options]");
         Console.WriteLine("  dotnet run --project tools/McpServer.AgentRouter.Tools -- verify [options]");
         Console.WriteLine("  dotnet run --project tools/McpServer.AgentRouter.Tools -- smoke [options]");
@@ -126,9 +218,27 @@ internal static class HelpWriter
         Console.WriteLine("  --max-prompt-chars <n>               Default: 500000");
         Console.WriteLine("  --max-output-chars <n>               Default: 32000");
         Console.WriteLine("  --tool-timeout-seconds <n>           Default: 900");
+        Console.WriteLine("  --output <text|json>                Default: text");
         Console.WriteLine("  --build                              Build the solution before writing configs.");
         Console.WriteLine("  verify runs restore, build, and the full repo test suite in C#.");
         Console.WriteLine("  smoke runs the high-fidelity harness, including default MCP tool coverage.");
+        Console.WriteLine();
+        Console.WriteLine("Chat options:");
+        Console.WriteLine("  --router-base-url <url>              Default: http://127.0.0.1:5177");
+        Console.WriteLine("  --model <model>                      Default: fast-local");
+        Console.WriteLine("  --chat-model <model>                 Alias for --model.");
+        Console.WriteLine("  --system <text>                      Optional system prompt.");
+        Console.WriteLine("  --system-file <path>                 Load the system prompt from a file.");
+        Console.WriteLine("  --prompt <text>                      Optional one-shot prompt.");
+        Console.WriteLine("  --prompt-file <path>                 Load the prompt from a file.");
+        Console.WriteLine("  --temperature <value>                Optional request temperature.");
+        Console.WriteLine("  --max-tokens <n>                     Optional max_tokens override.");
+        Console.WriteLine("  --stream <true|false>                Default: true, forced off for --output json.");
+        Console.WriteLine("  --interactive                        Force an interactive console session.");
+        Console.WriteLine("  --transcript <path>                  Write a JSON transcript to disk.");
+        Console.WriteLine("  --session-name <name>                Label the transcript/session.");
+        Console.WriteLine("  --timeout-seconds <n>                Default: 120");
+        Console.WriteLine("  --output <text|json>                 Default: text");
         Console.WriteLine();
         Console.WriteLine("Verification options:");
         Console.WriteLine("  --repo-root <path>                   Default: current directory");
@@ -141,6 +251,7 @@ internal static class HelpWriter
         Console.WriteLine("  --chat-model <model>                 Default: fast-local");
         Console.WriteLine("  --report-root <path>                 Default: workspace/artifacts/stress-runs");
         Console.WriteLine("  --timeout-seconds <seconds>          Default: 120");
+        Console.WriteLine("  --output <text|json>                Default: text");
         Console.WriteLine();
         Console.WriteLine("Stress options:");
         Console.WriteLine("  --chat-requests <n>                  Default: 12");
