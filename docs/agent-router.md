@@ -150,6 +150,7 @@ Default rules:
 - unknown host keys are blocked by default
 - inline shell switches are denied by default
 - output and timeout are bounded
+- `sudo` remains denied unless a profile explicitly sets `AllowSudoCommand=true`
 
 Profile loading order:
 
@@ -157,6 +158,11 @@ Profile loading order:
 2. `%LOCALAPPDATA%/McpServer/AgentRouter/ssh-profiles.json`
 
 The repo ignores `config/agentrouter/*.local.json`. Keep templates or examples checked in, not real secrets.
+
+For CLI smoke coverage, `scripts/Start-AgentRouterStack.ps1 -RunSmoke -EnableSshSmoke` will pass SSH smoke options through to the typed harness.
+
+- For a real host, set the password environment variable referenced by the repo-local SSH profile in the shell before launching the stack.
+- For admin workflows, create a separate SSH profile with `AllowSudoCommand=true` instead of broadening the default profile.
 
 ## Autonomous loop
 
@@ -193,6 +199,8 @@ Preferred local stack start:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Start-AgentRouterStack.ps1
 ```
 
+Pass `-RunSmoke` to that script when you want the typed .NET smoke harness to run the full default MCP tool suite against the freshly started AgentRouter stack.
+
 Smoke test:
 
 ```powershell
@@ -212,6 +220,8 @@ dotnet run --project .\tools\McpServer.AgentRouter.Tools -- smoke
 dotnet run --project .\tools\McpServer.AgentRouter.Tools -- stress
 dotnet run --project .\tools\McpServer.AgentRouter.Tools -- provider-unavailable
 ```
+
+The `smoke` command includes the full default MCP tool coverage suite plus loopback web scrape coverage.
 
 ## Manual examples
 

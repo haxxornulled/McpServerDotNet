@@ -141,7 +141,7 @@ finally
 
 static string ResolveAgentRouterContentRoot()
 {
-    var candidate = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+    var candidate = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", ".."));
     var projectFile = Path.Combine(candidate, "McpServer.AgentRouter.Host.csproj");
 
     return File.Exists(projectFile)

@@ -4,8 +4,14 @@ using McpServer.AgentRouter.Domain.AgentLoops;
 
 namespace McpServer.AgentRouter.Application.AgentLoops;
 
+/// <summary>
+/// Stops the loop once it has reached its configured step bound.
+/// </summary>
 public sealed class BoundedAgentLoopValidator : IAgentLoopValidator
 {
+    /// <summary>
+    /// Validates the loop against its step limit.
+    /// </summary>
     public ValueTask<Fin<AgentLoopValidation>> ValidateAsync(
         AgentLoopExecutionContext context,
         CancellationToken cancellationToken)

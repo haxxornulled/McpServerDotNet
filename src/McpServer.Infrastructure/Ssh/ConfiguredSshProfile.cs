@@ -13,8 +13,13 @@ public sealed record ConfiguredSshProfile(
     bool AcceptUnknownHostKey,
     IReadOnlyCollection<string> AllowedCommands,
     IReadOnlyCollection<string> DeniedCommands,
-    IReadOnlyCollection<string> AllowedRemotePathPrefixes)
+    IReadOnlyCollection<string> AllowedRemotePathPrefixes,
+    bool AllowSudoCommand = false)
 {
+    public SshCredentialSecret? PasswordSecret { get; init; }
+
+    public string? PasswordVaultItemName { get; init; }
+
     public ConfiguredSshProfile(
         string Name,
         string Host,
@@ -39,7 +44,27 @@ public sealed record ConfiguredSshProfile(
             AcceptUnknownHostKey: AcceptUnknownHostKey,
             AllowedCommands: [],
             DeniedCommands: [],
-            AllowedRemotePathPrefixes: [])
+            AllowedRemotePathPrefixes: [],
+            AllowSudoCommand: false)
     {
     }
+}
+
+public sealed record SshCredentialSecret
+{
+    public string Algorithm { get; init; } = "argon2id-aesgcm-v1";
+
+    public string Salt { get; init; } = string.Empty;
+
+    public string Nonce { get; init; } = string.Empty;
+
+    public string Tag { get; init; } = string.Empty;
+
+    public string Ciphertext { get; init; } = string.Empty;
+
+    public int Iterations { get; init; } = 3;
+
+    public int MemorySizeKiB { get; init; } = 65536;
+
+    public int DegreeOfParallelism { get; init; } = 1;
 }

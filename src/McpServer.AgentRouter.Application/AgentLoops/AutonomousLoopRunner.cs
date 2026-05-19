@@ -8,6 +8,9 @@ using Microsoft.Extensions.Logging;
 
 namespace McpServer.AgentRouter.Application.AgentLoops;
 
+/// <summary>
+/// Runs the autonomous agent loop lifecycle.
+/// </summary>
 public sealed class AutonomousLoopRunner : IAutonomousLoopRunner
 {
     private readonly IAgentStepPlanner _stepPlanner;
@@ -19,6 +22,9 @@ public sealed class AutonomousLoopRunner : IAutonomousLoopRunner
     private readonly AgentRouterRuntimeSettings _settings;
     private readonly ILogger<AutonomousLoopRunner> _logger;
 
+    /// <summary>
+    /// Initializes a new autonomous loop runner.
+    /// </summary>
     public AutonomousLoopRunner(
         IAgentStepPlanner stepPlanner,
         IToolExecutionPolicy toolExecutionPolicy,
@@ -39,6 +45,9 @@ public sealed class AutonomousLoopRunner : IAutonomousLoopRunner
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    /// <summary>
+    /// Executes the autonomous loop for the supplied request.
+    /// </summary>
     public async ValueTask<Fin<AgentLoopRun>> RunAsync(
         AgentLoopRequest? request,
         CancellationToken cancellationToken)

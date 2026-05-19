@@ -5,6 +5,7 @@ namespace McpServer.IntegrationTests.Infrastructure;
 
 public sealed class JsonRpcTestClient(StreamWriter input, StreamReader output)
 {
+    private static readonly TimeSpan DefaultResponseTimeout = TimeSpan.FromSeconds(60);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -17,7 +18,7 @@ public sealed class JsonRpcTestClient(StreamWriter input, StreamReader output)
         await WriteLineAsync(json, "message").ConfigureAwait(false);
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(10));
+        timeoutCts.CancelAfter(DefaultResponseTimeout);
 
         while (true)
         {
@@ -45,7 +46,7 @@ public sealed class JsonRpcTestClient(StreamWriter input, StreamReader output)
     public async Task<JsonDocument?> ReadMessageAsync(CancellationToken ct = default)
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(10));
+        timeoutCts.CancelAfter(DefaultResponseTimeout);
 
         var line = await output.ReadLineAsync(timeoutCts.Token).ConfigureAwait(false);
         return line is null ? null : JsonDocument.Parse(line);

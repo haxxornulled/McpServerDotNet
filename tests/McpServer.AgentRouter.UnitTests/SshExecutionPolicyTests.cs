@@ -114,7 +114,29 @@ public sealed class SshExecutionPolicyTests
         });
     }
 
-    private static SshExecutionPolicy CreatePolicy(IList<string>? allowedCommands = null)
+    [Fact]
+    public async Task EvaluateAsync_AllowsSudo_When_Profile_Opts_In()
+    {
+        var policy = CreatePolicy(allowedCommands: ["whoami"], allowSudoCommand: true);
+
+        var result = await policy.EvaluateAsync(new SshExecutionRequest
+        {
+            Profile = "dev",
+            Command = "sudo",
+            Arguments = ["whoami"],
+            WorkingDirectory = "/tmp"
+        }, CancellationToken.None);
+
+        Assert.True(result.IsSucc);
+        result.IfSucc(decision =>
+        {
+            Assert.True(decision.Allowed);
+            Assert.Equal("sudo", decision.ResolvedCommand);
+            Assert.Equal(["whoami"], decision.ResolvedArguments);
+        });
+    }
+
+    private static SshExecutionPolicy CreatePolicy(IList<string>? allowedCommands = null, bool allowSudoCommand = false)
     {
         var profiles = new Dictionary<string, SshProfileDefinition>(StringComparer.OrdinalIgnoreCase)
         {
@@ -127,7 +149,8 @@ public sealed class SshExecutionPolicyTests
                 WorkingDirectory = "/tmp",
                 AllowedCommands = allowedCommands ?? new List<string> { "pwd", "whoami" },
                 DeniedCommands = ["rm"],
-                AllowedRemotePathPrefixes = ["/tmp"]
+                AllowedRemotePathPrefixes = ["/tmp"],
+                AllowSudoCommand = allowSudoCommand
             }
         };
 

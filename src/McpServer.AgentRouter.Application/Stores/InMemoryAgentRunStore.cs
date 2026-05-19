@@ -6,10 +6,16 @@ using McpServer.AgentRouter.Domain.AgentRuns;
 
 namespace McpServer.AgentRouter.Application.Stores;
 
+/// <summary>
+/// Stores agent runs in memory for test and fallback scenarios.
+/// </summary>
 public sealed class InMemoryAgentRunStore : IAgentRunStore
 {
     private readonly ConcurrentDictionary<string, AgentRun> _runs = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Saves the supplied run in memory.
+    /// </summary>
     public ValueTask SaveAsync(
         AgentRun run,
         AgentRunRequest? request,
@@ -27,6 +33,9 @@ public sealed class InMemoryAgentRunStore : IAgentRunStore
         return ValueTask.CompletedTask;
     }
 
+    /// <summary>
+    /// Retrieves a run from memory.
+    /// </summary>
     public ValueTask<Fin<AgentRun>> GetAsync(
         string runId,
         CancellationToken cancellationToken)

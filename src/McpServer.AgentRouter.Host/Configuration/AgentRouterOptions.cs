@@ -273,6 +273,8 @@ public sealed class SshProfileOptions
     public IList<string> DeniedCommands { get; set; } = new List<string>();
 
     public IList<string> AllowedRemotePathPrefixes { get; set; } = new List<string>();
+
+    public bool AllowSudoCommand { get; set; }
 }
 
 public class AgentLoopOptions

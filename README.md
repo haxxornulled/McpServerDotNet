@@ -30,6 +30,7 @@ Optional surface, disabled unless explicitly configured:
 - `ssh.write_text`
 - `web.fetch_url`
 - `web.search`
+- `web.scrape_url`
 - `inference.local_status`
 - `inference.local_complete`
 - `inference.local_summarize`
@@ -83,6 +84,7 @@ The router uses `McpServer.Host` as its controlled child-process tool boundary f
 | `tests/McpServer.IntegrationTests` | stdio host integration coverage |
 | `tests/McpServer.AgentRouter.UnitTests` | AgentRouter unit coverage |
 | `tools/McpServer.AgentRouter.Tools` | typed smoke/stress/provider-unavailable harness |
+| `tools/McpServer.SshVaultCli` | SSH vault add/delete/list CLI |
 
 ## Safety defaults
 
@@ -93,6 +95,8 @@ The router uses `McpServer.Host` as its controlled child-process tool boundary f
 - AgentRouter MCP tool execution is allowlist-based by default.
 - AgentRouter shell execution is allowlist-based, bounded by a working-directory root, and blocks inline shell command switches by default.
 - AgentRouter SSH execution is named-profile based and keeps raw credentials out of request bodies.
+- `McpServer.Host` SSH profiles load from `config/mcpserver/ssh-profiles.local.json` by default, with user-local overrides in `%LOCALAPPDATA%\McpServer\ssh-profiles.json`, and encrypted password secrets stored alongside a local vault key at `%LOCALAPPDATA%\McpServer\ssh-vault.key`.
+- SSH vault items are managed with `tools/McpServer.SshVaultCli`; profiles can point at a named vault item through `passwordVaultItemName` instead of embedding a secret or reading from an environment variable.
 - Both hosts write operational traces/logs to repo-local runtime paths instead of mixing them into source directories.
 
 ## Build and test baseline
@@ -127,6 +131,8 @@ Run the preferred local stack script:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Start-AgentRouterStack.ps1
 ```
 
+Pass `-RunSmoke` to that script when you want the typed .NET smoke harness to run the full default MCP tool suite against the freshly started AgentRouter stack.
+
 ## Validation harnesses
 
 Quick router smoke:
@@ -146,6 +152,16 @@ Typed harness:
 ```powershell
 dotnet run --project .\tools\McpServer.AgentRouter.Tools -- smoke
 dotnet run --project .\tools\McpServer.AgentRouter.Tools -- stress
+```
+
+The `smoke` command includes the full default MCP tool coverage suite plus loopback web scrape coverage.
+
+SSH vault manager:
+
+```powershell
+dotnet run --project .\tools\McpServer.SshVaultCli -- help
+dotnet run --project .\tools\McpServer.SshVaultCli -- add dev --secret "..."
+dotnet run --project .\tools\McpServer.SshVaultCli -- delete dev
 ```
 
 stdio MCP smoke:

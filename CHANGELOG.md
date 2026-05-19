@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - Aligned the repo docs and AgentRouter smoke script with the current codebase, including the separate AgentRouter domain layer, explicit host-base workspace resolution, and `stream=true` SSE support.
 - Rewrote `scripts/README.md` to document the current supported script inventory, including the AgentRouter stack, smoke, and stress scripts.
 - Rewrote `docs/codex-vscode-mcp-setup.md` and `docs/ollama-local-inference-tools.md` to stop claiming machine-local config files are checked into the repo and to align the setup guidance with the current config-generation flow.
+- Added `web.scrape_url`, loopback web smoke coverage, explicit sudo opt-in for SSH profiles, and explicit workspace-root guidance for Visual Studio and VS Code.
 - Removed the stale root-level `README-AgentRouterStackScripts.md` in favor of the consolidated `docs/agent-router.md` and `scripts/README.md`.
 - Cleaned repo-local temporary runtime clutter and ignored artifact leftovers from the working tree.
 

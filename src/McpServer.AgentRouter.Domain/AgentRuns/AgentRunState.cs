@@ -1,14 +1,26 @@
 namespace McpServer.AgentRouter.Domain.AgentRuns;
 
+/// <summary>
+/// Owns the mutable state transitions for an agent run.
+/// </summary>
 public sealed class AgentRunState
 {
+    /// <summary>
+    /// Initializes a new run state wrapper.
+    /// </summary>
     private AgentRunState(AgentRun run)
     {
         Run = run ?? throw new ArgumentNullException(nameof(run));
     }
 
+    /// <summary>
+    /// Gets the backing run model.
+    /// </summary>
     public AgentRun Run { get; }
 
+    /// <summary>
+    /// Starts a new run for the supplied model and goal.
+    /// </summary>
     public static AgentRunState Start(
         string model,
         string goal)
@@ -30,11 +42,17 @@ public sealed class AgentRunState
         return new AgentRunState(run);
     }
 
+    /// <summary>
+    /// Updates the run timestamp without changing terminal state.
+    /// </summary>
     public void Touch()
     {
         Run.UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>
+    /// Marks the run as completed with a final result.
+    /// </summary>
     public void MarkCompleted(string result)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(result);
@@ -47,6 +65,9 @@ public sealed class AgentRunState
         Run.CompletedAt = now;
     }
 
+    /// <summary>
+    /// Marks the run as failed with a stable error payload.
+    /// </summary>
     public void MarkFailed(
         string errorMessage,
         string errorCode)
@@ -67,6 +88,9 @@ public sealed class AgentRunState
         Run.CompletedAt = now;
     }
 
+    /// <summary>
+    /// Adds a new artifact to the run.
+    /// </summary>
     public AgentRunArtifact AddArtifact(
         string type,
         string name,

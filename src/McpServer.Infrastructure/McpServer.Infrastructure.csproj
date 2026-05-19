@@ -5,6 +5,8 @@
     <AssemblyName>McpServer.Infrastructure</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="AngleSharp" />
+    <PackageReference Include="Konscious.Security.Cryptography.Argon2" />
     <PackageReference Include="LanguageExt.Core" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Http" />

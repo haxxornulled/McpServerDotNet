@@ -93,7 +93,8 @@ $disabledTools = @(
     'fs.delete_path',
     'ssh.execute',
     'web.fetch_url',
-    'web.search'
+    'web.search',
+    'web.scrape_url'
 )
 
 $codexLines = New-Object System.Collections.Generic.List[string]

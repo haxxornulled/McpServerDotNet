@@ -1,3 +1,5 @@
+using McpServer.Infrastructure.Ssh;
+
 namespace McpServer.Host.Configuration;
 
 public sealed class McpServerOptions
@@ -74,6 +76,27 @@ public sealed class SshOptions
 {
     public bool Enabled { get; init; }
     public SshProfileOptions[] Profiles { get; init; } = [];
+
+    public bool LoadRepoProfilesFile { get; init; } = true;
+
+    public string RepoProfilesFilePath { get; init; } = Path.Combine("..", "..", "..", "..", "..", "config", "mcpserver", "ssh-profiles.local.json");
+
+    public bool LoadUserProfilesFile { get; init; } = true;
+
+    public string UserProfilesFilePath { get; init; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "McpServer",
+        "ssh-profiles.json");
+
+    public bool AllowInlineProfiles { get; init; }
+
+    public string VaultPath { get; init; } = Path.Combine("..", "..", "..", "..", "..", "config", "mcpserver", "ssh-vault.local.json");
+
+    public string VaultKeyPath { get; init; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "McpServer",
+        "ssh-vault.key");
+
     public bool UseTestBackend { get; init; }
     public string TestBackendRootPath { get; init; } = string.Empty;
 }
@@ -90,6 +113,8 @@ public sealed class SshProfileOptions
     public string? WorkingDirectory { get; init; }
     public string? HostKeySha256 { get; init; }
     public bool AcceptUnknownHostKey { get; init; }
+    public SshCredentialSecret? PasswordSecret { get; init; }
+    public string? PasswordVaultItemName { get; init; }
     public string[] AllowedCommands { get; init; } = [];
     public string[] DeniedCommands { get; init; } =
     [
@@ -107,6 +132,7 @@ public sealed class SshProfileOptions
         "zsh"
     ];
     public string[] AllowedRemotePathPrefixes { get; init; } = [];
+    public bool AllowSudoCommand { get; init; }
 }
 
 

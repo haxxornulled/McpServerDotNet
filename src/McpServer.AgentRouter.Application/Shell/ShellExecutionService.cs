@@ -6,6 +6,9 @@ using Microsoft.Extensions.Logging;
 
 namespace McpServer.AgentRouter.Application.Shell;
 
+/// <summary>
+/// Coordinates shell policy, execution, and tracing.
+/// </summary>
 public sealed class ShellExecutionService : IShellExecutionService
 {
     private readonly IShellExecutionPolicy _policy;
@@ -13,6 +16,9 @@ public sealed class ShellExecutionService : IShellExecutionService
     private readonly IShellExecutionTraceWriter _traceWriter;
     private readonly ILogger<ShellExecutionService> _logger;
 
+    /// <summary>
+    /// Initializes a new shell execution service.
+    /// </summary>
     public ShellExecutionService(
         IShellExecutionPolicy policy,
         IShellCommandExecutor executor,
@@ -25,6 +31,9 @@ public sealed class ShellExecutionService : IShellExecutionService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    /// <summary>
+    /// Executes the supplied shell request end to end.
+    /// </summary>
     public async ValueTask<Fin<ShellExecutionResponse>> ExecuteAsync(
         ShellExecutionRequest? request,
         CancellationToken cancellationToken)

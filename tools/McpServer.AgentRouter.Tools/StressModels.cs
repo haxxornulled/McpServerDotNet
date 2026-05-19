@@ -245,6 +245,10 @@ internal sealed class ConsoleStressReporter
         Console.WriteLine($"ChatModel:          {settings.ChatModel}");
         Console.WriteLine($"ReportDirectory:    {reportDirectory}");
         Console.WriteLine($"TimeoutSeconds:     {settings.TimeoutSeconds.ToString(CultureInfo.InvariantCulture)}");
+        if (settings.EnableMcpDefaultToolCoverage)
+        {
+            Console.WriteLine("MCP default coverage: enabled");
+        }
         if (settings.EnableSshExecution)
         {
             Console.WriteLine($"SSH workload:       enabled profile={settings.SshProfile} command={settings.SshCommand}");

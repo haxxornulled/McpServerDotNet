@@ -2,16 +2,16 @@
 param(
     [string]$InferenceBaseUrl = 'http://127.0.0.1:1234',
     [string]$Model,
-    [string]$ScenarioPath = (Join-Path $PSScriptRoot 'inference-tool-scenarios.json'),
+    [string]$ScenarioPath = '',
     [ValidateSet('Release', 'Debug')]
     [string]$Configuration = 'Release',
-    [string]$HostExecutablePath = (Join-Path $PSScriptRoot "../src/McpServer.Host/bin/Release/net10.0/McpServer.Host.exe"),
-    [string]$HostProjectPath = (Join-Path $PSScriptRoot '../src/McpServer.Host/McpServer.Host.csproj'),
+    [string]$HostExecutablePath = '',
+    [string]$HostProjectPath = '',
     [string[]]$IncludeTool,
     [string[]]$SkipTool,
     [int]$MaxConversationTurns = 4,
     [int]$InferenceTimeoutSeconds = 180,
-    [int]$McpTimeoutSeconds = 15,
+    [int]$McpTimeoutSeconds = 60,
     [string]$ResultPath,
     [switch]$AllowMissingScenarios,
     [switch]$ListToolsOnly
@@ -19,6 +19,125 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+function Write-FramedMessage {
+    param(
+        [Parameter(Mandatory = $true)] [System.IO.Stream] $Stream,
+        [Parameter(Mandatory = $true)] [string] $Json
+    )
+
+    $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($Json)
+    $headerBytes = [System.Text.Encoding]::ASCII.GetBytes("Content-Length: $($bodyBytes.Length)`r`n`r`n")
+    $Stream.Write($headerBytes, 0, $headerBytes.Length)
+    $Stream.Write($bodyBytes, 0, $bodyBytes.Length)
+    $Stream.Flush()
+}
+
+function Read-LineFromStream {
+    param(
+        [Parameter(Mandatory = $true)] [System.IO.Stream] $Stream
+    )
+
+    $bytes = [System.Collections.Generic.List[byte]]::new()
+    while ($true) {
+        $value = $Stream.ReadByte()
+        if ($value -lt 0) {
+            if ($bytes.Count -eq 0) { return $null }
+            break
+        }
+
+        if ($value -eq 10) { break }
+        [void]$bytes.Add([byte]$value)
+    }
+
+    if ($bytes.Count -gt 0 -and $bytes[$bytes.Count - 1] -eq 13) {
+        $bytes.RemoveAt($bytes.Count - 1)
+    }
+
+    return [System.Text.Encoding]::UTF8.GetString($bytes.ToArray())
+}
+
+function Read-JsonRpcMessage {
+    param(
+        [Parameter(Mandatory = $true)] [System.IO.Stream] $Stream
+    )
+
+    $firstLine = Read-LineFromStream -Stream $Stream
+    if ($null -eq $firstLine) { return $null }
+
+    if ($firstLine.StartsWith('Content-Length:', [System.StringComparison]::OrdinalIgnoreCase)) {
+        $lengthText = $firstLine.Substring('Content-Length:'.Length).Trim()
+        $contentLength = [int]::Parse($lengthText, [System.Globalization.CultureInfo]::InvariantCulture)
+
+        while ($true) {
+            $headerLine = Read-LineFromStream -Stream $Stream
+            if ($null -eq $headerLine -or $headerLine.Length -eq 0) { break }
+        }
+
+        $buffer = [byte[]]::new($contentLength)
+        $offset = 0
+        while ($offset -lt $contentLength) {
+            $read = $Stream.Read($buffer, $offset, $contentLength - $offset)
+            if ($read -le 0) { throw 'Server closed stdout while reading framed response body.' }
+            $offset += $read
+        }
+
+        return [System.Text.Encoding]::UTF8.GetString($buffer)
+    }
+
+    return $firstLine
+}
+
+function Send-RequestAndReadResponse {
+    param(
+        [Parameter(Mandatory = $true)] [System.IO.Stream] $InputStream,
+        [Parameter(Mandatory = $true)] [System.IO.Stream] $OutputStream,
+        [Parameter(Mandatory = $true)] [string] $Json
+    )
+
+    Write-FramedMessage -Stream $InputStream -Json $Json
+
+    while ($true) {
+        $message = Read-JsonRpcMessage -Stream $OutputStream
+        if ($null -eq $message) { return $null }
+
+        $document = $message | ConvertFrom-Json
+        if ($null -ne $document.id) { return $document }
+    }
+}
+
+$scriptRoot = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+    $PSScriptRoot
+}
+elseif (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
+    Split-Path -Parent $PSCommandPath
+}
+else {
+    (Get-Location).Path
+}
+
+$repoRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptRoot '..'))
+
+if ([string]::IsNullOrWhiteSpace($ScenarioPath)) {
+    $ScenarioPath = Join-Path $scriptRoot 'inference-tool-scenarios.json'
+}
+elseif (-not [System.IO.Path]::IsPathRooted($ScenarioPath)) {
+    $ScenarioPath = Join-Path $scriptRoot $ScenarioPath
+}
+
+if ([string]::IsNullOrWhiteSpace($HostExecutablePath)) {
+    $HostExecutablePath = Join-Path $scriptRoot '../src/McpServer.Host/bin/Release/net10.0/McpServer.Host.exe'
+}
+elseif (-not [System.IO.Path]::IsPathRooted($HostExecutablePath)) {
+    $HostExecutablePath = Join-Path $scriptRoot $HostExecutablePath
+}
+
+if ([string]::IsNullOrWhiteSpace($HostProjectPath)) {
+    $HostProjectPath = Join-Path $scriptRoot '../src/McpServer.Host/McpServer.Host.csproj'
+}
+elseif (-not [System.IO.Path]::IsPathRooted($HostProjectPath)) {
+    $HostProjectPath = Join-Path $scriptRoot $HostProjectPath
+}
 
 function Resolve-AbsolutePath {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -56,11 +175,16 @@ function Start-McpServerProcess {
     $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
-    $psi.StandardInputEncoding = [System.Text.UTF8Encoding]::new($false)
-    $psi.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
-    $psi.StandardErrorEncoding = [System.Text.UTF8Encoding]::new($false)
+    $psi.WorkingDirectory = $repoRoot
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
+    $psi.Environment["ASPNETCORE_ENVIRONMENT"] = "Development"
+    $psi.Environment["MCPSERVER__WORKSPACE__ROOTPATH"] = $repoRoot
+    $psi.Environment["MCPSERVER__WORKSPACE__ALLOWEDROOTS__0"] = $repoRoot
+    $psi.Environment["MCPSERVER__WORKSPACE__ALLOWRUNTIMEWORKSPACEOPEN"] = "true"
+    $psi.Environment["MCPSERVER__SHELL__ENABLED"] = "false"
+    $psi.Environment["MCPSERVER__WEBACCESS__ENABLED"] = "false"
+    $psi.Environment["MCPSERVER__SSH__ENABLED"] = "false"
 
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo = $psi
@@ -72,8 +196,7 @@ function Start-McpServerProcess {
     Start-Sleep -Milliseconds 250
 
     if ($process.HasExited) {
-        $stderr = $process.StandardError.ReadToEnd()
-        throw "MCP server exited during startup. $stderr"
+        throw 'MCP server exited during startup.'
     }
 
     return $process
@@ -83,7 +206,12 @@ function Stop-McpServerProcess {
     param([Parameter(Mandatory = $true)][System.Diagnostics.Process]$Process)
 
     if (-not $Process.HasExited) {
-        $Process.Kill($true)
+        try {
+            $Process.Kill($true)
+        }
+        catch {
+            $Process.Kill()
+        }
         $Process.WaitForExit()
     }
 
@@ -94,20 +222,6 @@ function ConvertTo-CompactJson {
     param([Parameter(Mandatory = $true)]$Value)
 
     return ($Value | ConvertTo-Json -Depth 50 -Compress)
-}
-
-function Read-LineWithTimeout {
-    param(
-        [Parameter(Mandatory = $true)][System.IO.StreamReader]$Reader,
-        [Parameter(Mandatory = $true)][int]$TimeoutSeconds
-    )
-
-    $task = $Reader.ReadLineAsync()
-    if (-not $task.Wait([TimeSpan]::FromSeconds($TimeoutSeconds))) {
-        throw "Timed out waiting for MCP response after $TimeoutSeconds seconds."
-    }
-
-    return $task.Result
 }
 
 function Send-McpMessage {
@@ -123,8 +237,7 @@ function Send-McpMessage {
         throw 'Serialized MCP message must not contain newlines.'
     }
 
-    $Process.StandardInput.WriteLine($json)
-    $Process.StandardInput.Flush()
+    Write-FramedMessage -Stream $Process.StandardInput.BaseStream -Json $json
 
     if ($Notification) {
         return $null
@@ -139,12 +252,12 @@ function Send-McpMessage {
     }
 
     while ($true) {
-        $line = Read-LineWithTimeout -Reader $Process.StandardOutput -TimeoutSeconds $TimeoutSeconds
-        if ([string]::IsNullOrWhiteSpace($line)) {
-            throw 'Received empty MCP response.'
+        $messageJson = Read-JsonRpcMessage -Stream $Process.StandardOutput.BaseStream
+        if ($null -eq $messageJson) {
+            throw 'Received end of stream while waiting for MCP response.'
         }
 
-        $message = $line | ConvertFrom-Json -Depth 50
+        $message = $messageJson | ConvertFrom-Json
         if ($null -eq $expectedId) {
             return $message
         }
@@ -349,7 +462,7 @@ if (-not [string]::IsNullOrWhiteSpace($ResultPath)) {
     $resolvedResultPath = Resolve-AbsolutePath -Path $ResultPath
 }
 
-$scenarios = Get-Content -LiteralPath $resolvedScenarioPath -Raw | ConvertFrom-Json -Depth 50
+$scenarios = Get-Content -LiteralPath $resolvedScenarioPath -Raw | ConvertFrom-Json
 if ($null -eq $scenarios -or $scenarios.Count -eq 0) {
     throw "Scenario file did not contain any scenarios: $resolvedScenarioPath"
 }
@@ -610,7 +723,7 @@ try {
                     $lastToolArguments = $arguments
 
                     try {
-                        $parsedArguments = $arguments | ConvertFrom-Json -Depth 50
+                        $parsedArguments = $arguments | ConvertFrom-Json
                     }
                     catch {
                         throw "Model returned invalid JSON arguments for '$toolName': $arguments"

@@ -317,7 +317,6 @@ function Assert-ErrorEnvelope {
     Write-Fail "$Name returned code '$actualCode' / type '$actualType', expected code '$ExpectedCode' / type '$ExpectedType'. Message: $message"
 }
 
-
 function Resolve-LocalPath {
     param([string] $PathValue)
 

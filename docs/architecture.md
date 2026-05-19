@@ -116,9 +116,10 @@ Key properties:
 
 - The stdio host is the only MCP tool boundary; AgentRouter does not bypass it for MCP tool calls.
 - `McpServer.Host` disables shell, SSH, web, and Ollama by default.
+- Web access includes fetch, search, and scrape tools when explicitly enabled.
 - AgentRouter keeps cloud providers off by default and rejects non-loopback Ollama URLs unless explicitly allowed.
 - AgentRouter web search uses a configurable base URL, and local loopback/private targets can be explicitly enabled for controlled test harnesses.
-- AgentRouter SSH can be switched to a deterministic test backend when integration coverage needs to avoid a live SSH target.
+- AgentRouter SSH can be switched to a deterministic test backend when integration coverage needs to avoid a live SSH target, and sudo remains opt-in at the profile level.
 - AgentRouter MCP tool calls, shell commands, and SSH commands are all policy-gated before execution.
 - Trace files are written for MCP tool calls, shell execution, SSH execution, loops, and agent runs.
 

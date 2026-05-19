@@ -45,6 +45,12 @@ dotnet build .\McpServer.slnx -c Release -v minimal
 
 The generated config points at the built `McpServer.Host` executable under the current repo checkout.
 
+## Visual Studio
+
+If you debug the stdio host from Visual Studio, use the checked-in launch profile in `src/McpServer.Host/Properties/launchSettings.json`.
+
+That profile already sets the workspace root explicitly to the repository root, so the host does not depend on the current working directory or compiled output folder.
+
 ## Safety defaults
 
 The generated configs are intended to stay conservative:

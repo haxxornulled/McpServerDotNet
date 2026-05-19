@@ -1,0 +1,16 @@
+{
+  "profiles": {
+    "McpServer.Host": {
+      "commandName": "Project",
+      "launchBrowser": false,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "MCPSERVER__WORKSPACE__ROOTPATH": "..\\..\\..\\..\\..",
+        "MCPSERVER__WORKSPACE__ALLOWEDROOTS__0": "..\\..\\..\\..\\..",
+        "MCPSERVER__WORKSPACE__ALLOWRUNTIMEWORKSPACEOPEN": "true",
+        "MCPSERVER__WEBACCESS__ENABLED": "false",
+        "MCPSERVER__SSH__ENABLED": "false"
+      }
+    }
+  }
+}

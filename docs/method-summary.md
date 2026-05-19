@@ -38,7 +38,9 @@ This document summarizes the repo's production-facing entrypoints and the main s
 | `IPathPolicy` | Read/write path normalization and containment enforcement |
 | `IResourcePathTranslator` | Maps MCP resource URIs to local paths |
 | `IProcessExecutionService` | Runs validated non-interactive local processes |
-| `IWebAccessService` | Optional outbound fetch/search execution |
+| `IWebFetchService` | Optional outbound fetch execution with policy gating |
+| `IWebSearchService` | Optional provider-backed web search execution |
+| `IWebScrapeService` | Optional HTML scraping and CSS selector extraction |
 | `ISshService` | Optional profile-based SSH execution and remote file writes |
 
 ### Public MCP surface
@@ -57,6 +59,7 @@ Conditionally registered:
 - `shell.exec`
 - `web.fetch_url`
 - `web.search`
+- `web.scrape_url`
 - `ssh.execute`
 - `ssh.write_text`
 - `inference.local_*`

@@ -8,9 +8,9 @@ using Microsoft.Extensions.Logging;
 
 namespace McpServer.Application.Mcp.Tools
 {
-    public sealed class WebSearchToolHandler(
-        IWebAccessService webAccessService,
-        ILogger<WebSearchToolHandler> logger) : IToolHandler<WebSearchRequest>
+public sealed class WebSearchToolHandler(
+    IWebSearchService webSearchService,
+    ILogger<WebSearchToolHandler> logger) : IToolHandler<WebSearchRequest>
     {
         public string Name => "web.search";
         public string Description => "Searches the web for a given query.";
@@ -38,8 +38,8 @@ namespace McpServer.Application.Mcp.Tools
 
         public async ValueTask<Fin<CallToolResult>> Handle(WebSearchRequest request, CancellationToken ct)
         {
-            var result = await webAccessService
-                .SearchWebAsync(new SearchWebCommand(request.Query, request.MaxResults), ct)
+            var result = await webSearchService
+                .SearchAsync(new SearchWebCommand(request.Query, request.MaxResults), ct)
                 .ConfigureAwait(false);
 
             return result.Map(searchResults =>

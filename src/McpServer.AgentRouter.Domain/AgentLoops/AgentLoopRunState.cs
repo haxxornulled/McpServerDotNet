@@ -1,14 +1,26 @@
 namespace McpServer.AgentRouter.Domain.AgentLoops;
 
+/// <summary>
+/// Owns the mutable state transitions for an agent loop run.
+/// </summary>
 public sealed class AgentLoopRunState
 {
+    /// <summary>
+    /// Initializes a new run state wrapper.
+    /// </summary>
     private AgentLoopRunState(AgentLoopRun run)
     {
         Run = run ?? throw new ArgumentNullException(nameof(run));
     }
 
+    /// <summary>
+    /// Gets the backing run model.
+    /// </summary>
     public AgentLoopRun Run { get; }
 
+    /// <summary>
+    /// Starts a new loop run for the supplied goal.
+    /// </summary>
     public static AgentLoopRunState Start(string goal)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(goal);
@@ -26,6 +38,9 @@ public sealed class AgentLoopRunState
         return new AgentLoopRunState(run);
     }
 
+    /// <summary>
+    /// Creates a new step entry and appends it to the run.
+    /// </summary>
     public AgentLoopStep BeginStep(int sequence, AgentPlannedStep plannedStep)
     {
         ArgumentNullException.ThrowIfNull(plannedStep);
@@ -48,6 +63,9 @@ public sealed class AgentLoopRunState
         return step;
     }
 
+    /// <summary>
+    /// Applies a policy decision to an in-flight step.
+    /// </summary>
     public void ApplyPolicyDecision(
         AgentLoopStep step,
         ToolExecutionPolicyDecision decision)
@@ -58,6 +76,9 @@ public sealed class AgentLoopRunState
         step.PolicyDecision = decision.Decision;
     }
 
+    /// <summary>
+    /// Completes a step as denied by policy.
+    /// </summary>
     public void CompleteDeniedStep(
         AgentLoopStep step,
         string reason)
@@ -72,6 +93,9 @@ public sealed class AgentLoopRunState
         step.CompletedAt = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>
+    /// Completes a step as failed.
+    /// </summary>
     public void CompleteFailedStep(
         AgentLoopStep step,
         string errorMessage,
@@ -88,6 +112,9 @@ public sealed class AgentLoopRunState
         step.ElapsedMilliseconds = elapsedMilliseconds;
     }
 
+    /// <summary>
+    /// Completes a step with the outcome returned from a tool execution.
+    /// </summary>
     public void CompleteExecutedStep(
         AgentLoopStep step,
         AgentToolExecutionResult toolResult,
@@ -106,6 +133,9 @@ public sealed class AgentLoopRunState
             : fallbackElapsedMilliseconds;
     }
 
+    /// <summary>
+    /// Applies inspection feedback to the current step.
+    /// </summary>
     public void ApplyInspection(
         AgentLoopStep step,
         AgentResultInspection inspection)
@@ -120,11 +150,17 @@ public sealed class AgentLoopRunState
         }
     }
 
+    /// <summary>
+    /// Updates the run's last-modified timestamp.
+    /// </summary>
     public void Touch()
     {
         Run.UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>
+    /// Marks the run as completed with a final result.
+    /// </summary>
     public void MarkCompleted(string result)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(result);
@@ -137,6 +173,9 @@ public sealed class AgentLoopRunState
         Run.CompletedAt = now;
     }
 
+    /// <summary>
+    /// Marks the run as failed with an error payload.
+    /// </summary>
     public void MarkFailed(
         string errorMessage,
         string errorCode)

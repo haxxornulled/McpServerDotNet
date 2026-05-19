@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Serilog;
 
 namespace McpServer.AgentRouter.Tools;
 
@@ -9,15 +10,32 @@ internal static class Program
 {
     public static async Task<int> Main(string[] args)
     {
-        using var cancellation = new CancellationTokenSource();
+        Log.Logger = new LoggerConfiguration()
+            .MinimumLevel.Information()
+            .WriteTo.Console(outputTemplate: "{Message:lj}{NewLine}{Exception}")
+            .CreateLogger();
 
-        Console.CancelKeyPress += (_, eventArgs) =>
+        try
         {
-            eventArgs.Cancel = true;
-            cancellation.Cancel();
-        };
+            using var cancellation = new CancellationTokenSource();
 
-        return await AgentRouterToolProgram.RunAsync(args, cancellation.Token).ConfigureAwait(false);
+            Console.CancelKeyPress += (_, eventArgs) =>
+            {
+                eventArgs.Cancel = true;
+                cancellation.Cancel();
+            };
+
+            return await AgentRouterToolProgram.RunAsync(args, cancellation.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Log.Fatal(ex, "AgentRouter tools failed.");
+            return 1;
+        }
+        finally
+        {
+            Log.CloseAndFlush();
+        }
     }
 }
 

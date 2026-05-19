@@ -15,7 +15,9 @@ namespace McpServer.Infrastructure.Ssh;
 public sealed class SshService(
     IEnumerable<ConfiguredSshProfile> profiles,
     string contentRoot,
-    ILogger<SshService> logger) : ISshService
+    ILogger<SshService> logger,
+    SshCredentialVault? credentialVault = null,
+    SshCredentialVaultStore? credentialVaultStore = null) : ISshService
 {
     private const int MinimumTimeoutSeconds = 1;
     private const int MaximumTimeoutSeconds = 1800;
@@ -25,6 +27,8 @@ public sealed class SshService(
     private readonly Dictionary<string, ConfiguredSshProfile> _profiles = profiles
         .Where(static profile => !string.IsNullOrWhiteSpace(profile.Name))
         .ToDictionary(static profile => profile.Name, StringComparer.OrdinalIgnoreCase);
+    private readonly SshCredentialVault? _credentialVault = credentialVault;
+    private readonly SshCredentialVaultStore? _credentialVaultStore = credentialVaultStore;
 
     public async ValueTask<Fin<SshCommandResult>> ExecuteAsync(ExecuteSshCommand command, CancellationToken ct)
     {
@@ -247,7 +251,30 @@ public sealed class SshService(
     {
         List<AuthenticationMethod> authMethods = [];
 
-        if (!string.IsNullOrWhiteSpace(profile.PasswordEnvironmentVariable))
+        if (!string.IsNullOrWhiteSpace(profile.PasswordVaultItemName))
+        {
+            if (_credentialVaultStore is null)
+            {
+                throw new InvalidOperationException(
+                    $"SSH profile '{profile.Name}' uses a vault item reference, but no SSH credential vault store is configured.");
+            }
+
+            var password = _credentialVaultStore.ResolveSecret(profile.PasswordVaultItemName);
+            authMethods.Add(new PasswordAuthenticationMethod(profile.Username, password));
+        }
+        else
+        if (profile.PasswordSecret is not null)
+        {
+            if (_credentialVault is null)
+            {
+                throw new InvalidOperationException(
+                    $"SSH profile '{profile.Name}' uses an encrypted password secret, but no SSH credential vault is configured.");
+            }
+
+            var password = _credentialVault.Unprotect(profile.PasswordSecret);
+            authMethods.Add(new PasswordAuthenticationMethod(profile.Username, password));
+        }
+        else if (!string.IsNullOrWhiteSpace(profile.PasswordEnvironmentVariable))
         {
             var password = Environment.GetEnvironmentVariable(profile.PasswordEnvironmentVariable);
             if (string.IsNullOrWhiteSpace(password))
@@ -281,7 +308,7 @@ public sealed class SshService(
         if (authMethods.Count is 0)
         {
             throw new InvalidOperationException(
-                $"SSH profile '{profile.Name}' must define either PasswordEnvironmentVariable or PrivateKeyPath.");
+                $"SSH profile '{profile.Name}' must define PasswordVaultItemName, PasswordSecret, PasswordEnvironmentVariable, or PrivateKeyPath.");
         }
 
         return new ConnectionInfo(profile.Host, profile.Port, profile.Username, authMethods.ToArray())
@@ -357,10 +384,11 @@ public sealed class SshService(
         }
 
         var executable = ExtractExecutableName(command.Command);
+        var sudoAllowed = IsSudoCommand(executable) && profile.AllowSudoCommand;
         var deniedCommands = new System.Collections.Generic.HashSet<string>(
             profile.DeniedCommands.Where(static value => !string.IsNullOrWhiteSpace(value)),
             StringComparer.OrdinalIgnoreCase);
-        if (deniedCommands.Contains(executable))
+        if (!sudoAllowed && deniedCommands.Contains(executable))
         {
             return Error.New($"SSH command '{executable}' is denied by profile '{profile.Name}'.");
         }
@@ -373,13 +401,16 @@ public sealed class SshService(
             return Error.New($"SSH profile '{profile.Name}' requires an explicit command allowlist.");
         }
 
-        if (!allowedCommands.Contains(executable))
+        if (!allowedCommands.Contains(executable) && !sudoAllowed)
         {
             return Error.New($"SSH command '{executable}' is not in the allowlist for profile '{profile.Name}'.");
         }
 
         return LanguageExt.Prelude.unit;
     }
+
+    private static bool IsSudoCommand(string executable) =>
+        executable.Equals("sudo", StringComparison.OrdinalIgnoreCase);
 
     private static string ExtractExecutableName(string command)
     {

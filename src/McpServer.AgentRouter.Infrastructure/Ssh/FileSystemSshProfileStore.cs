@@ -217,7 +217,8 @@ public sealed class FileSystemSshProfileStore : ISshProfileStore
             AcceptUnknownHostKey = source.AcceptUnknownHostKey,
             AllowedCommands = source.AllowedCommands.ToList(),
             DeniedCommands = source.DeniedCommands.ToList(),
-            AllowedRemotePathPrefixes = source.AllowedRemotePathPrefixes.ToList()
+            AllowedRemotePathPrefixes = source.AllowedRemotePathPrefixes.ToList(),
+            AllowSudoCommand = source.AllowSudoCommand
         };
     }
 }

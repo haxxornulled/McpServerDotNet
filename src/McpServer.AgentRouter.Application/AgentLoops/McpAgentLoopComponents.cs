@@ -7,6 +7,9 @@ using Microsoft.Extensions.Logging;
 
 namespace McpServer.AgentRouter.Application.AgentLoops;
 
+/// <summary>
+/// Plans the next agent loop step from the current loop context.
+/// </summary>
 public sealed class McpAgentStepPlanner : IAgentStepPlanner
 {
     private static readonly JsonElement DefaultListDirectoryArguments = JsonSerializer.SerializeToElement(new
@@ -14,6 +17,9 @@ public sealed class McpAgentStepPlanner : IAgentStepPlanner
         path = "."
     });
 
+    /// <summary>
+    /// Plans the next loop step.
+    /// </summary>
     public ValueTask<Fin<AgentPlannedStep>> PlanNextStepAsync(
         AgentLoopExecutionContext context,
         CancellationToken cancellationToken)
@@ -52,11 +58,17 @@ public sealed class McpAgentStepPlanner : IAgentStepPlanner
     }
 }
 
+/// <summary>
+/// Executes MCP-backed agent loop steps.
+/// </summary>
 public sealed class McpAgentToolExecutor : IAgentToolExecutor
 {
     private readonly IMcpToolCallService _toolCallService;
     private readonly ILogger<McpAgentToolExecutor> _logger;
 
+    /// <summary>
+    /// Initializes a new MCP agent tool executor.
+    /// </summary>
     public McpAgentToolExecutor(
         IMcpToolCallService toolCallService,
         ILogger<McpAgentToolExecutor> logger)
@@ -65,6 +77,9 @@ public sealed class McpAgentToolExecutor : IAgentToolExecutor
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    /// <summary>
+    /// Executes the planned MCP step.
+    /// </summary>
     public async ValueTask<Fin<AgentToolExecutionResult>> ExecuteAsync(
         AgentToolExecutionRequest request,
         CancellationToken cancellationToken)
@@ -312,8 +327,14 @@ public sealed class McpAgentToolExecutor : IAgentToolExecutor
     }
 }
 
+/// <summary>
+/// Inspects MCP tool results and determines the next loop action.
+/// </summary>
 public sealed class McpAgentResultInspector : IAgentResultInspector
 {
+    /// <summary>
+    /// Inspects the tool execution result.
+    /// </summary>
     public ValueTask<Fin<AgentResultInspection>> InspectAsync(
         AgentLoopExecutionContext context,
         AgentPlannedStep plannedStep,

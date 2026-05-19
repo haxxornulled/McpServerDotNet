@@ -230,38 +230,68 @@ public sealed class AutofacRootModule : Module
                 .As<IWebPolicy>()
                 .SingleInstance();
 
-            builder.RegisterType<WebAccessService>().As<IWebAccessService>().SingleInstance();
+            builder.RegisterType<DuckDuckGoHtmlSearchProvider>()
+                .As<IWebSearchProvider>()
+                .SingleInstance();
+
+            builder.RegisterType<WebFetchService>().As<IWebFetchService>().SingleInstance();
+            builder.RegisterType<WebSearchService>().As<IWebSearchService>().SingleInstance();
+            builder.RegisterType<WebScrapeService>().As<IWebScrapeService>().SingleInstance();
             RegisterTool<WebFetchUrlToolHandler>(builder);
             RegisterTool<WebSearchToolHandler>(builder);
+            RegisterTool<WebScrapeUrlToolHandler>(builder);
         }
 
-        if (options.Ssh.Enabled && options.Ssh.Profiles.Length > 0)
+        if (options.Ssh.Enabled)
         {
-            var configuredProfiles = CreateConfiguredProfiles(options.Ssh.Profiles);
+            builder.RegisterInstance(new SshCredentialVaultStore(
+                    options.Ssh.VaultPath,
+                    options.Ssh.VaultKeyPath,
+                    AppContext.BaseDirectory))
+                .AsSelf()
+                .SingleInstance();
 
-            if (options.Ssh.UseTestBackend)
-            {
-                builder.Register(ctx => new TestSshService(
-                        configuredProfiles,
-                        string.IsNullOrWhiteSpace(options.Ssh.TestBackendRootPath)
-                            ? Path.Combine(Path.GetTempPath(), "mcpserver-ssh-test-backend")
-                            : options.Ssh.TestBackendRootPath,
-                        ctx.Resolve<ILogger<TestSshService>>()))
-                    .As<ISshService>()
-                    .SingleInstance();
-            }
-            else
-            {
-                builder.Register(ctx => new SshService(
-                        configuredProfiles,
-                        AppContext.BaseDirectory,
-                        ctx.Resolve<ILogger<SshService>>()))
-                    .As<ISshService>()
-                    .SingleInstance();
-            }
+            var configuredProfiles = FileSystemSshProfileStore.LoadProfiles(
+                AppContext.BaseDirectory,
+                options.Ssh.LoadRepoProfilesFile,
+                options.Ssh.RepoProfilesFilePath,
+                options.Ssh.LoadUserProfilesFile,
+                options.Ssh.UserProfilesFilePath,
+                options.Ssh.AllowInlineProfiles,
+                CreateConfiguredProfiles(options.Ssh.Profiles));
 
-            RegisterTool<SshExecuteToolHandler>(builder);
-            RegisterTool<SshWriteTextToolHandler>(builder);
+            if (configuredProfiles.Count > 0)
+            {
+                builder.RegisterInstance(new SshCredentialVault(options.Ssh.VaultKeyPath))
+                    .AsSelf()
+                    .SingleInstance();
+
+                if (options.Ssh.UseTestBackend)
+                {
+                    builder.Register(ctx => new TestSshService(
+                            configuredProfiles,
+                            string.IsNullOrWhiteSpace(options.Ssh.TestBackendRootPath)
+                                ? Path.Combine(Path.GetTempPath(), "mcpserver-ssh-test-backend")
+                                : options.Ssh.TestBackendRootPath,
+                            ctx.Resolve<ILogger<TestSshService>>()))
+                        .As<ISshService>()
+                        .SingleInstance();
+                }
+                else
+                {
+                    builder.Register(ctx => new SshService(
+                            configuredProfiles,
+                            AppContext.BaseDirectory,
+                            ctx.Resolve<ILogger<SshService>>(),
+                            ctx.Resolve<SshCredentialVault>(),
+                            ctx.Resolve<SshCredentialVaultStore>()))
+                        .As<ISshService>()
+                        .SingleInstance();
+                }
+
+                RegisterTool<SshExecuteToolHandler>(builder);
+                RegisterTool<SshWriteTextToolHandler>(builder);
+            }
         }
     }
 
@@ -291,6 +321,11 @@ public sealed class AutofacRootModule : Module
                 profile.AcceptUnknownHostKey,
                 profile.AllowedCommands,
                 profile.DeniedCommands,
-                profile.AllowedRemotePathPrefixes))
+                profile.AllowedRemotePathPrefixes,
+                profile.AllowSudoCommand)
+            {
+                PasswordSecret = profile.PasswordSecret,
+                PasswordVaultItemName = profile.PasswordVaultItemName
+            })
             .ToArray();
 }

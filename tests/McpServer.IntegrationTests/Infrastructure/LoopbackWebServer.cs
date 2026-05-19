@@ -24,6 +24,8 @@ public sealed class LoopbackWebServer : IAsyncDisposable
 
     public string SearchBaseUrl => $"{BaseAddress}search?q=";
 
+    public string ScrapeUrl => new Uri(BaseAddress, "scrape").ToString();
+
     public IReadOnlyCollection<string> RequestPaths => _requestPaths.ToArray();
 
     public static Task<LoopbackWebServer> StartAsync()
@@ -128,6 +130,29 @@ public sealed class LoopbackWebServer : IAsyncDisposable
                         <main>Search results for {System.Net.WebUtility.HtmlEncode(query)}</main>
                         <p>Result one for {System.Net.WebUtility.HtmlEncode(query)}</p>
                         <p>Result two for {System.Net.WebUtility.HtmlEncode(query)}</p>
+                      </body>
+                    </html>
+                    """;
+
+                await WriteTextResponseAsync(stream, html, contentType: "text/html; charset=utf-8", cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
+                return;
+            }
+
+            if (string.Equals(path, "/scrape", StringComparison.OrdinalIgnoreCase))
+            {
+                var html = """
+                    <html>
+                      <head><title>Loopback Scrape</title></head>
+                      <body>
+                        <article class="card" data-id="one">
+                          <h2>First Article</h2>
+                          <a href="/articles/one">Read more</a>
+                        </article>
+                        <article class="card" data-id="two">
+                          <h2>Second Article</h2>
+                          <a href="/articles/two">Read more</a>
+                        </article>
                       </body>
                     </html>
                     """;

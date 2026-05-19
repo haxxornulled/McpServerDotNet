@@ -205,7 +205,8 @@ internal static class ConfiguredAgentRouterRuntimeSettingsFactory
             AcceptUnknownHostKey = source.AcceptUnknownHostKey,
             AllowedCommands = source.AllowedCommands.ToList(),
             DeniedCommands = source.DeniedCommands.ToList(),
-            AllowedRemotePathPrefixes = source.AllowedRemotePathPrefixes.ToList()
+            AllowedRemotePathPrefixes = source.AllowedRemotePathPrefixes.ToList(),
+            AllowSudoCommand = source.AllowSudoCommand
         };
     }
 
@@ -220,7 +221,7 @@ internal static class ConfiguredAgentRouterRuntimeSettingsFactory
                 continue;
             }
 
-            environment[pair.Key.Trim()] = pair.Value;
+            environment[pair.Key.Trim().Replace(":", "__", StringComparison.Ordinal)] = pair.Value;
         }
 
         return environment;

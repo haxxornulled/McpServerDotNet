@@ -13,10 +13,17 @@ namespace McpServer.AgentRouter.Tools;
 
 internal sealed class StressRunner
 {
+    private const string DefaultMcpToolCoverageWorkload = "MCP default tool coverage";
+    private const string DefaultMcpToolCoverageFolder = "cli-tool-coverage";
+    private const string DefaultMcpToolCoverageSourceFile = DefaultMcpToolCoverageFolder + "/source.txt";
+    private const string DefaultMcpToolCoverageCopiedFile = DefaultMcpToolCoverageFolder + "/copy.txt";
+    private const string DefaultMcpToolCoverageMovedFile = DefaultMcpToolCoverageFolder + "/moved.txt";
+
     private readonly HttpClient _httpClient;
     private readonly StressSettings _settings;
     private readonly ConsoleStressReporter _reporter;
     private readonly JsonSerializerOptions _jsonOptions;
+    private string? _defaultMcpWorkspaceRoot;
 
     public StressRunner(HttpClient httpClient, StressSettings settings, ConsoleStressReporter reporter)
     {
@@ -121,6 +128,11 @@ internal sealed class StressRunner
                 cancellationToken).ConfigureAwait(false);
         }
 
+        if (_settings.EnableMcpDefaultToolCoverage)
+        {
+            await RunMcpDefaultToolCoverageAsync(results, cancellationToken).ConfigureAwait(false);
+        }
+
         var orderedResults = results
             .OrderBy(static item => item.Workload, StringComparer.OrdinalIgnoreCase)
             .ThenBy(static item => item.Index)
@@ -152,7 +164,7 @@ internal sealed class StressRunner
         {
             var toolCount = JsonFieldReader.GetInt32(mcpToolsResponse.Json, "toolCount") ?? 0;
             _reporter.WritePass("AgentRouter /agent/mcp/tools responded.");
-            Console.WriteLine($"MCP tool count: {toolCount.ToString(CultureInfo.InvariantCulture)}");
+            _reporter.WriteInfo($"MCP tool count: {toolCount.ToString(CultureInfo.InvariantCulture)}");
 
             if (toolCount <= 0)
             {
@@ -338,6 +350,76 @@ internal sealed class StressRunner
             cancellationToken).ConfigureAwait(false);
     }
 
+    private async Task RunMcpDefaultToolCoverageAsync(
+        ConcurrentBag<StressRequestResult> results,
+        CancellationToken cancellationToken)
+    {
+        _defaultMcpWorkspaceRoot = null;
+        _reporter.WriteWorkloadHeader(DefaultMcpToolCoverageWorkload, DefaultMcpToolCoverageCases.Count, 1);
+
+        var workloadResults = new List<StressRequestResult>(DefaultMcpToolCoverageCases.Count);
+
+        for (var index = 1; index <= DefaultMcpToolCoverageCases.Count; index++)
+        {
+            var result = await InvokeMcpDefaultToolCoverageAsync(index, cancellationToken).ConfigureAwait(false);
+            workloadResults.Add(result);
+            results.Add(result);
+        }
+
+        _reporter.WriteWorkloadSummary(
+            DefaultMcpToolCoverageWorkload,
+            StressSummaryCalculator.Calculate(workloadResults).Single());
+        _reporter.WriteFailedResults(workloadResults);
+    }
+
+    private async Task<StressRequestResult> InvokeMcpDefaultToolCoverageAsync(int index, CancellationToken cancellationToken)
+    {
+        var scenario = DefaultMcpToolCoverageCases[index - 1];
+        var workspaceRoot = _defaultMcpWorkspaceRoot;
+
+        if (scenario.RequiresWorkspaceRoot && string.IsNullOrWhiteSpace(workspaceRoot))
+        {
+            return StressRequestResult.Failed(
+                DefaultMcpToolCoverageWorkload,
+                index,
+                0,
+                0,
+                "Default MCP workspace root was not resolved from workspace.status.",
+                DateTimeOffset.UtcNow);
+        }
+
+        var body = new
+        {
+            toolName = scenario.ToolName,
+            arguments = scenario.ArgumentsFactory(workspaceRoot)
+        };
+
+        Action<JsonNode?>? responseObserver = null;
+        if (string.Equals(scenario.ToolName, "workspace.status", StringComparison.OrdinalIgnoreCase))
+        {
+            responseObserver = json =>
+            {
+                _defaultMcpWorkspaceRoot =
+                    JsonFieldReader.GetString(json, "result", "structuredContent", "workspaceRoot")
+                    ?? string.Empty;
+            };
+        }
+
+        return await InvokeJsonWorkloadAsync(
+            DefaultMcpToolCoverageWorkload,
+            index,
+            HttpMethod.Post,
+            "/agent/mcp/tools/call",
+            body,
+            json => CreateMcpDefaultToolCoveragePreview(scenario.ToolName, json),
+            json => string.Equals(JsonFieldReader.GetString(json, "status"), "completed", StringComparison.OrdinalIgnoreCase)
+                && (JsonFieldReader.GetBoolean(json, "allowed") ?? false)
+                && (!string.Equals(scenario.ToolName, "workspace.status", StringComparison.OrdinalIgnoreCase)
+                    || !string.IsNullOrWhiteSpace(JsonFieldReader.GetString(json, "result", "structuredContent", "workspaceRoot"))),
+            cancellationToken,
+            responseObserver).ConfigureAwait(false);
+    }
+
     private async Task<StressRequestResult> InvokeShellExecutionAsync(int index, CancellationToken cancellationToken)
     {
         var body = new
@@ -392,7 +474,8 @@ internal sealed class StressRunner
         object? body,
         Func<JsonNode?, string> previewFactory,
         Func<JsonNode?, bool> successPredicate,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<JsonNode?>? responseObserver = null)
     {
         var startedAtUtc = DateTimeOffset.UtcNow;
         var stopwatch = Stopwatch.StartNew();
@@ -412,6 +495,7 @@ internal sealed class StressRunner
         }
 
         stopwatch.Stop();
+        responseObserver?.Invoke(response.Json);
 
         var success = response.Success && successPredicate(response.Json);
         var preview = response.Json is null ? string.Empty : previewFactory(response.Json);
@@ -449,6 +533,18 @@ internal sealed class StressRunner
         return FormattableString.Invariant($"traceId={traceId}");
     }
 
+    private static string CreateMcpDefaultToolCoveragePreview(string toolName, JsonNode? json)
+    {
+        var traceId = JsonFieldReader.GetString(json, "traceId") ?? string.Empty;
+        if (string.Equals(toolName, "workspace.status", StringComparison.OrdinalIgnoreCase))
+        {
+            var workspaceRoot = JsonFieldReader.GetString(json, "result", "structuredContent", "workspaceRoot") ?? string.Empty;
+            return FormattableString.Invariant($"tool={toolName}; workspaceRoot={workspaceRoot}; traceId={traceId}");
+        }
+
+        return FormattableString.Invariant($"tool={toolName}; traceId={traceId}");
+    }
+
     private static string CreateShellExecutionPreview(JsonNode? json)
     {
         var traceId = JsonFieldReader.GetString(json, "trace_id") ?? string.Empty;
@@ -477,4 +573,84 @@ internal sealed class StressRunner
 
         return Path.Combine(Path.GetFullPath(root), runId);
     }
+
+    private sealed record McpDefaultToolCoverageCase(
+        string ToolName,
+        bool RequiresWorkspaceRoot,
+        Func<string?, object> ArgumentsFactory);
+
+    private static readonly IReadOnlyList<McpDefaultToolCoverageCase> DefaultMcpToolCoverageCases =
+    [
+        new("activity.schemas.list", false, static _ => new { }),
+        new("activity.route", false, static _ => new
+        {
+            request = "Diagnose a build failure in this repository."
+        }),
+        new("activity.context.preview", false, static _ => new
+        {
+            request = "Explain the current isolated integration workspace.",
+            activity = "explain",
+            maxContextBytes = 4000
+        }),
+        new("activity.run", false, static _ => new
+        {
+            request = "Explain the current isolated integration workspace.",
+            activity = "explain",
+            maxContextBytes = 4000,
+            runBuild = false,
+            runTests = false
+        }),
+        new("workspace.status", false, static _ => new { }),
+        new("workspace.open", true, static root => new { path = root }),
+        new("workspace.set_root", true, static root => new { path = root }),
+        new("fs.create_directory", true, static _ => new { path = DefaultMcpToolCoverageFolder }),
+        new("fs.write_text", true, static _ => new
+        {
+            path = DefaultMcpToolCoverageSourceFile,
+            content = "hello",
+            overwrite = true
+        }),
+        new("fs.append_text", true, static _ => new
+        {
+            path = DefaultMcpToolCoverageSourceFile,
+            content = Environment.NewLine + "world",
+            flush = true
+        }),
+        new("fs.read_text", true, static _ => new { path = DefaultMcpToolCoverageSourceFile }),
+        new("fs.read_file", true, static _ => new { path = DefaultMcpToolCoverageSourceFile }),
+        new("fs.get_metadata", true, static _ => new { path = DefaultMcpToolCoverageSourceFile }),
+        new("fs.list_directory", true, static _ => new { path = DefaultMcpToolCoverageFolder }),
+        new("fs.copy_path", true, static _ => new
+        {
+            source_path = DefaultMcpToolCoverageSourceFile,
+            destination_path = DefaultMcpToolCoverageCopiedFile,
+            overwrite = true
+        }),
+        new("fs.move_path", true, static _ => new
+        {
+            source_path = DefaultMcpToolCoverageCopiedFile,
+            destination_path = DefaultMcpToolCoverageMovedFile,
+            overwrite = true
+        }),
+        new("fs.delete_path", true, static _ => new
+        {
+            path = DefaultMcpToolCoverageMovedFile,
+            recursive = false
+        }),
+        new("workspace.select_folder", true, static _ => new { path = DefaultMcpToolCoverageFolder }),
+        new("workspace.inspect", true, static _ => new
+        {
+            path = ".",
+            maxDepth = 1,
+            maxFiles = 8,
+            maxFileBytes = 4096,
+            maxTotalFileBytes = 8192
+        }),
+        new("workspace.set_root", true, static root => new { path = root }),
+        new("fs.delete_path", true, static _ => new
+        {
+            path = DefaultMcpToolCoverageFolder,
+            recursive = true
+        })
+    ];
 }

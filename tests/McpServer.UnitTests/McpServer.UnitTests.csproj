@@ -24,5 +24,6 @@
     <ProjectReference Include="..\..\src\McpServer.Protocol\McpServer.Protocol.csproj" />
     <ProjectReference Include="..\..\src\McpServer.Infrastructure\McpServer.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\McpServer.Host\McpServer.Host.csproj" />
+    <ProjectReference Include="..\..\tools\McpServer.SshVaultCli\McpServer.SshVaultCli.csproj" />
   </ItemGroup>
 </Project>

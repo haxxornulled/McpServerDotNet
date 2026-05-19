@@ -121,7 +121,7 @@ Write-Section "Stopping recorded AgentRouter stack processes"
 
 if (Test-Path $pidDirectory) {
     Stop-PidFile -Name "AgentRouter" -PidFile (Join-Path $pidDirectory "agentrouter.pid")
-    Stop-PidFile -Name "AgentRouter background wrapper" -PidFile (Join-Path $pidDirectory "agentr-router.pid")
+    Stop-PidFile -Name "AgentRouter background wrapper" -PidFile (Join-Path $pidDirectory "agentrouter.pid")
 
     if ($KillOllama) {
         Stop-PidFile -Name "Ollama" -PidFile (Join-Path $pidDirectory "ollama.pid")

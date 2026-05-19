@@ -11,10 +11,10 @@ using Microsoft.Extensions.Logging;
 
 namespace McpServer.Infrastructure.Web;
 
-public sealed class WebAccessService(
+public sealed class WebFetchService(
     IHttpClientFactory httpClientFactory,
     IWebPolicy webPolicy,
-    ILogger<WebAccessService> logger) : IWebAccessService
+    ILogger<WebFetchService> logger) : IWebFetchService
 {
     public async ValueTask<Fin<FetchedPageResult>> FetchUrlAsync(FetchUrlCommand command, CancellationToken ct)
     {
@@ -107,55 +107,6 @@ public sealed class WebAccessService(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed fetching URL {Url}", command.Url);
-            return Error.New(ex.Message);
-        }
-    }
-
-    public async ValueTask<Fin<IReadOnlyList<WebSearchResult>>> SearchWebAsync(SearchWebCommand command, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(command.Query))
-        {
-            return Error.New("Search query is required.");
-        }
-
-        var requestUri = $"{webPolicy.SearchBaseUrl}{Uri.EscapeDataString(command.Query)}";
-        var validated = await ValidateUrlAndDnsAsync(requestUri, ct).ConfigureAwait(false);
-        if (validated.IsFail)
-        {
-            return PropagateFailure<IReadOnlyList<WebSearchResult>>(validated);
-        }
-
-        try
-        {
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            linkedCts.CancelAfter(webPolicy.DefaultTimeout);
-
-            var client = httpClientFactory.CreateClient("web-search");
-
-            using var response = await SendWithPolicyAsync(client, requestUri, linkedCts.Token).ConfigureAwait(false);
-            var body = await response.Content.ReadAsStringAsync(linkedCts.Token).ConfigureAwait(false);
-            var text = HtmlTextExtractor.ExtractReadableText(body);
-
-            IReadOnlyList<WebSearchResult> results =
-            [
-                new WebSearchResult(
-                    Title: $"Search results for: {command.Query}",
-                    Url: response.RequestMessage?.RequestUri?.ToString() ?? requestUri,
-                    Snippet: text.Length > 300 ? text[..300] : text,
-                    Relevance: 1.0)
-            ];
-
-            logger.LogInformation("Executed web search for query {Query}", command.Query);
-
-            return results.Take(Math.Max(1, command.MaxResults)).ToArray();
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed searching web for query {Query}", command.Query);
             return Error.New(ex.Message);
         }
     }

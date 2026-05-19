@@ -31,6 +31,8 @@ internal sealed class StressSettings
 
     public int McpToolCallConcurrency { get; init; } = 3;
 
+    public bool EnableMcpDefaultToolCoverage { get; init; }
+
     public int ShellExecutionRequests { get; init; } = 6;
 
     public int ShellExecutionConcurrency { get; init; } = 2;
@@ -78,6 +80,7 @@ internal sealed class StressSettings
             McpCatalogConcurrency = options.GetInt("mcp-catalog-concurrency", 4),
             McpToolCallRequests = options.GetInt("mcp-tool-call-requests", 12),
             McpToolCallConcurrency = options.GetInt("mcp-tool-call-concurrency", 3),
+            EnableMcpDefaultToolCoverage = options.HasFlag("enable-mcp-default-tool-coverage"),
             ShellExecutionRequests = options.GetInt("shell-exec-requests", 6),
             ShellExecutionConcurrency = options.GetInt("shell-exec-concurrency", 2),
             EnableSshExecution = options.HasFlag("enable-ssh"),
@@ -112,8 +115,9 @@ internal sealed class StressSettings
             AgentLoopConcurrency = 1,
             McpCatalogRequests = SkipMcpCatalog ? 0 : 1,
             McpCatalogConcurrency = 1,
-            McpToolCallRequests = SkipMcpToolCalls ? 0 : 1,
+            McpToolCallRequests = 0,
             McpToolCallConcurrency = 1,
+            EnableMcpDefaultToolCoverage = true,
             ShellExecutionRequests = SkipShellExecution ? 0 : 1,
             ShellExecutionConcurrency = 1,
             EnableSshExecution = EnableSshExecution,

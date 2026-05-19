@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text.Json;
+using Serilog;
 
 namespace McpServer.AgentRouter.Tools;
 
@@ -74,44 +75,30 @@ internal static class ConsoleWriter
 {
     public static void WriteSection(string name)
     {
-        Console.WriteLine();
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine("============================================================");
-        Console.WriteLine(name);
-        Console.WriteLine("============================================================");
-        Console.ResetColor();
+        Log.Information(string.Empty);
+        Log.Information("============================================================");
+        Log.Information(name);
+        Log.Information("============================================================");
     }
 
     public static void WritePass(string message)
     {
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.Write("[PASS] ");
-        Console.ResetColor();
-        Console.WriteLine(message);
+        Log.Information("[PASS] {Message}", message);
     }
 
     public static void WriteInfo(string message)
     {
-        Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.Write("[INFO] ");
-        Console.ResetColor();
-        Console.WriteLine(message);
+        Log.Information("[INFO] {Message}", message);
     }
 
     public static void WriteWarning(string message)
     {
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.Write("[WARN] ");
-        Console.ResetColor();
-        Console.WriteLine(message);
+        Log.Warning("[WARN] {Message}", message);
     }
 
     public static void WriteError(string message)
     {
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.Write("[FAIL] ");
-        Console.ResetColor();
-        Console.WriteLine(message);
+        Log.Error("[FAIL] {Message}", message);
     }
 }
 
@@ -125,6 +112,7 @@ internal static class HelpWriter
         Console.WriteLine("  dotnet run --project tools/McpServer.AgentRouter.Tools -- smoke [options]");
         Console.WriteLine("  dotnet run --project tools/McpServer.AgentRouter.Tools -- stress [options]");
         Console.WriteLine("  dotnet run --project tools/McpServer.AgentRouter.Tools -- provider-unavailable [options]");
+        Console.WriteLine("  smoke runs the high-fidelity harness, including default MCP tool coverage.");
         Console.WriteLine();
         Console.WriteLine("Common options:");
         Console.WriteLine("  --router-base-url <url>              Default: http://127.0.0.1:5177");
@@ -143,6 +131,7 @@ internal static class HelpWriter
         Console.WriteLine("  --mcp-catalog-concurrency <n>        Default: 4");
         Console.WriteLine("  --mcp-tool-call-requests <n>         Default: 12");
         Console.WriteLine("  --mcp-tool-call-concurrency <n>      Default: 3");
+        Console.WriteLine("  --enable-mcp-default-tool-coverage   Run the full default MCP tool suite once.");
         Console.WriteLine("  --shell-exec-requests <n>            Default: 6");
         Console.WriteLine("  --shell-exec-concurrency <n>         Default: 2");
         Console.WriteLine("  --enable-ssh                         Enable opt-in SSH workload.");

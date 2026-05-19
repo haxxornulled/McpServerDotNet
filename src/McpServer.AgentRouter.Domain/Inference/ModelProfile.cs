@@ -1,7 +1,13 @@
 namespace McpServer.AgentRouter.Domain.Inference;
 
+/// <summary>
+/// Describes a model profile and its safety limits.
+/// </summary>
 public sealed class ModelProfile
 {
+    /// <summary>
+    /// Initializes a new model profile.
+    /// </summary>
     public ModelProfile(
         string name,
         string provider,
@@ -35,23 +41,53 @@ public sealed class ModelProfile
         TimeoutSeconds = Math.Clamp(timeoutSeconds, 1, 3600);
     }
 
+    /// <summary>
+    /// Gets the profile name.
+    /// </summary>
     public string Name { get; }
 
+    /// <summary>
+    /// Gets the provider name.
+    /// </summary>
     public string Provider { get; }
 
+    /// <summary>
+    /// Gets the model identifier.
+    /// </summary>
     public string Model { get; }
 
+    /// <summary>
+    /// Gets the base URI used for requests.
+    /// </summary>
     public Uri BaseUri { get; }
 
+    /// <summary>
+    /// Gets the configured context length.
+    /// </summary>
     public int ContextLength { get; }
 
+    /// <summary>
+    /// Gets the maximum output token budget.
+    /// </summary>
     public int MaxOutputTokens { get; }
 
+    /// <summary>
+    /// Gets the default sampling temperature.
+    /// </summary>
     public double Temperature { get; }
 
+    /// <summary>
+    /// Gets a value indicating whether cloud providers are allowed.
+    /// </summary>
     public bool AllowCloudProvider { get; }
 
+    /// <summary>
+    /// Gets a value indicating whether non-loopback base URIs are allowed.
+    /// </summary>
     public bool AllowNonLoopbackBaseUrl { get; }
 
+    /// <summary>
+    /// Gets the request timeout in seconds.
+    /// </summary>
     public int TimeoutSeconds { get; }
 }

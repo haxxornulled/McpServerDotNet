@@ -9,7 +9,7 @@
       3. Optionally build the solution.
       4. Start McpServer.AgentRouter.Host.
       5. Wait for /health.
-      6. Optionally run scripts/Test-AgentRouter.ps1.
+      6. Optionally run the typed .NET smoke harness in tools/McpServer.AgentRouter.Tools.
 
     Compatible with Windows PowerShell 5.1.
 
@@ -21,6 +21,9 @@
 
 .EXAMPLE
     .\scripts\Start-AgentRouterStack.ps1 -NoNewWindows -Build
+
+.EXAMPLE
+    .\scripts\Start-AgentRouterStack.ps1 -NoNewWindows -RunSmoke -EnableSshSmoke -SshProfile dev
 #>
 
 [CmdletBinding()]
@@ -35,6 +38,8 @@ param(
 
     [string] $AgentRouterProjectPath = ".\src\McpServer.AgentRouter.Host\McpServer.AgentRouter.Host.csproj",
 
+    [string] $AgentRouterToolsProjectPath = ".\tools\McpServer.AgentRouter.Tools\McpServer.AgentRouter.Tools.csproj",
+
     [string] $RunStorageRoot = ".\workspace\artifacts\agent-runs",
 
     [string[]] $RequiredModels = @(
@@ -46,6 +51,14 @@ param(
     [switch] $Build,
 
     [switch] $RunSmoke,
+
+    [switch] $EnableSshSmoke,
+
+    [string] $SshProfile = "dev",
+
+    [string] $SshCommand = "whoami",
+
+    [string] $SshWorkingDirectory = "/tmp",
 
     [switch] $NoNewWindows
 )
@@ -74,6 +87,95 @@ else {
     Join-Path $repoRoot $RunStorageRoot
 }
 
+function Get-SshProfilePasswordEnvironmentVariableName {
+    param([string] $ProfileName)
+
+    foreach ($candidate in @(
+        (Join-Path $repoRoot "config\agentrouter\ssh-profiles.local.json"),
+        (Join-Path $repoRoot "config\agentrouter\ssh-profiles.local.example.json")
+    )) {
+        if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            continue
+        }
+
+        try {
+            $document = Get-Content -LiteralPath $candidate -Raw | ConvertFrom-Json
+            $profiles = $document.profiles
+            if ($profiles -eq $null) {
+                continue
+            }
+
+            $profile = $profiles.PSObject.Properties[$ProfileName]
+            if ($profile -eq $null -or $profile.Value -eq $null) {
+                continue
+            }
+
+            $value = $profile.Value.passwordEnvironmentVariable
+            if (-not [string]::IsNullOrWhiteSpace($value)) {
+                return [string] $value
+            }
+        }
+        catch {
+        }
+    }
+
+    return $null
+}
+
+if ($RunSmoke -and $EnableSshSmoke) {
+    $sshPasswordEnvironmentVariable = Get-SshProfilePasswordEnvironmentVariableName -ProfileName $SshProfile
+    if ([string]::IsNullOrWhiteSpace($sshPasswordEnvironmentVariable)) {
+        Write-Host "[ERROR] SSH smoke requested for profile '$SshProfile', but the local profile file does not define a passwordEnvironmentVariable." -ForegroundColor Red
+        exit 1
+    }
+
+    $sshSecret = [Environment]::GetEnvironmentVariable($sshPasswordEnvironmentVariable)
+    if ([string]::IsNullOrWhiteSpace($sshSecret)) {
+        Write-Host "[ERROR] SSH smoke requested for profile '$SshProfile', but environment variable '$sshPasswordEnvironmentVariable' is not set in this shell." -ForegroundColor Red
+        exit 1
+    }
+}
+
+$smokeAllowedTools = @(
+    "activity.context.preview",
+    "activity.route",
+    "activity.run",
+    "activity.schemas.list",
+    "fs.append_text",
+    "fs.copy_path",
+    "fs.create_directory",
+    "fs.delete_path",
+    "fs.get_metadata",
+    "fs.list_directory",
+    "fs.move_path",
+    "fs.read_file",
+    "fs.read_text",
+    "fs.write_text",
+    "workspace.inspect",
+    "workspace.open",
+    "workspace.select_folder",
+    "workspace.set_root",
+    "workspace.status"
+)
+
+$smokeAllowedToolsBlock = ""
+if ($RunSmoke) {
+    $smokeAllowedToolLines = @()
+    for ($index = 0; $index -lt $smokeAllowedTools.Count; $index++) {
+        $smokeAllowedToolLines += "`$env:AgentRouter__ToolExecution__AllowedTools__$index = '$($smokeAllowedTools[$index])'"
+    }
+
+    $smokeAllowedToolsBlock = $smokeAllowedToolLines -join "`r`n"
+}
+
+$routerEnvironmentBlock = @(
+    "`$env:ASPNETCORE_URLS = '$RouterBaseUrl'"
+    "`$env:AgentRouter__BindUrl = '$RouterBaseUrl'"
+    "`$env:AgentRouter__RunStorage__RootPath = '$resolvedRunStorageRoot'"
+)
+
+$routerEnvironmentBlock = ($routerEnvironmentBlock + $smokeAllowedToolsBlock) -join "`r`n"
+
 function Write-Section {
     param([string] $Name)
 
@@ -99,6 +201,23 @@ function Write-Bad {
     param([string] $Message)
 
     Write-Host "[ERROR] $Message" -ForegroundColor Red
+}
+
+function Write-ProcessLogsIfPresent {
+    param(
+        [string] $StdOutPath,
+        [string] $StdErrPath
+    )
+
+    if ((Test-Path -LiteralPath $StdOutPath) -and ((Get-Item -LiteralPath $StdOutPath).Length -gt 0)) {
+        Write-Host "--- AgentRouter stdout ---" -ForegroundColor DarkCyan
+        Get-Content -LiteralPath $StdOutPath -Tail 200 | Write-Host
+    }
+
+    if ((Test-Path -LiteralPath $StdErrPath) -and ((Get-Item -LiteralPath $StdErrPath).Length -gt 0)) {
+        Write-Host "--- AgentRouter stderr ---" -ForegroundColor DarkCyan
+        Get-Content -LiteralPath $StdErrPath -Tail 200 | Write-Host
+    }
 }
 
 function Get-ListenerProcessId {
@@ -283,33 +402,33 @@ Write-Section "AgentRouter"
 $routerPid = Get-ListenerProcessId -Port $routerPort
 
 if ($routerPid -ne $null) {
+    if ($RunSmoke) {
+        Write-Bad "AgentRouter is already listening on port $routerPort. Full smoke coverage requires a fresh AgentRouter process so the smoke allowlist can be applied."
+        exit 1
+    }
+
     Write-Warn "Something is already listening on port $routerPort. PID: $routerPid"
     Write-Host "Reusing existing AgentRouter listener."
 }
 else {
     $routerCommand = @"
-`$env:ASPNETCORE_URLS = '$RouterBaseUrl'
-`$env:AgentRouter__BindUrl = '$RouterBaseUrl'
-`$env:AgentRouter__RunStorage__RootPath = '$resolvedRunStorageRoot'
+$routerEnvironmentBlock
 dotnet run --project '$AgentRouterProjectPath' -c '$Configuration'
 "@
+
+    $routerProcessId = $null
 
     if ($NoNewWindows) {
-        $backgroundRouterCommand = @"
-`$env:ASPNETCORE_URLS = '$RouterBaseUrl'
-`$env:AgentRouter__BindUrl = '$RouterBaseUrl'
-`$env:AgentRouter__RunStorage__RootPath = '$resolvedRunStorageRoot'
-dotnet run --project '$AgentRouterProjectPath' -c '$Configuration'
-"@
-
-        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($backgroundRouterCommand))
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($routerCommand))
         Start-BackgroundCommand `
             -Name "AgentRouter" `
             -FilePath "powershell.exe" `
             -Arguments "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded" `
-            -PidFileName "agentr-router.pid" `
+            -PidFileName "agentrouter.pid" `
             -StdOutName "agentrouter.out.log" `
             -StdErrName "agentrouter.err.log"
+
+        $routerProcessId = Get-ListenerProcessId -Port $routerPort
     }
     else {
         Start-VisiblePowerShell `
@@ -320,6 +439,14 @@ dotnet run --project '$AgentRouterProjectPath' -c '$Configuration'
 }
 
 if (-not (Wait-Endpoint -Name "AgentRouter" -Uri "$RouterBaseUrl/health" -TimeoutSeconds $StartupTimeoutSeconds)) {
+    if ($routerProcessId -ne $null) {
+        Write-Warn "AgentRouter process PID: $routerProcessId"
+    }
+
+    Write-ProcessLogsIfPresent `
+        -StdOutPath (Join-Path $logDirectory "agentrouter.out.log") `
+        -StdErrPath (Join-Path $logDirectory "agentrouter.err.log")
+
     exit 1
 }
 
@@ -347,13 +474,29 @@ catch {
 if ($RunSmoke) {
     Write-Section "Smoke test"
 
-    $smokeScript = Join-Path $repoRoot "scripts\Test-AgentRouter.ps1"
+    $smokeArguments = @(
+        "smoke",
+        "--router-base-url",
+        $RouterBaseUrl
+    )
 
-    if (Test-Path $smokeScript) {
-        powershell.exe -NoProfile -ExecutionPolicy Bypass -File $smokeScript
+    if ($EnableSshSmoke) {
+        $smokeArguments += @(
+            "--enable-ssh",
+            "--ssh-profile",
+            $SshProfile,
+            "--ssh-command",
+            $SshCommand,
+            "--ssh-working-directory",
+            $SshWorkingDirectory
+        )
     }
-    else {
-        Write-Warn "Smoke script not found at $smokeScript"
+
+    & dotnet run --project $AgentRouterToolsProjectPath -c $Configuration -- @smokeArguments
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Bad "Typed smoke harness failed with exit code $LASTEXITCODE."
+        exit $LASTEXITCODE
     }
 }
 

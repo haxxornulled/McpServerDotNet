@@ -5,6 +5,9 @@ using McpServer.AgentRouter.Domain.Ssh;
 
 namespace McpServer.AgentRouter.Application.Ssh;
 
+/// <summary>
+/// Evaluates SSH execution requests against policy and profile rules.
+/// </summary>
 public sealed class SshExecutionPolicy : ISshExecutionPolicy
 {
     private static readonly string[] InlineCommandSwitches =
@@ -18,6 +21,9 @@ public sealed class SshExecutionPolicy : ISshExecutionPolicy
     private readonly AgentRouterRuntimeSettings _settings;
     private readonly ISshProfileStore _profileStore;
 
+    /// <summary>
+    /// Initializes a new SSH execution policy.
+    /// </summary>
     public SshExecutionPolicy(
         AgentRouterRuntimeSettings settings,
         ISshProfileStore profileStore)
@@ -26,6 +32,9 @@ public sealed class SshExecutionPolicy : ISshExecutionPolicy
         _profileStore = profileStore ?? throw new ArgumentNullException(nameof(profileStore));
     }
 
+    /// <summary>
+    /// Evaluates the supplied SSH request.
+    /// </summary>
     public async ValueTask<Fin<SshExecutionPolicyDecision>> EvaluateAsync(
         SshExecutionRequest request,
         CancellationToken cancellationToken)
@@ -84,8 +93,9 @@ public sealed class SshExecutionPolicy : ISshExecutionPolicy
         }
 
         var normalizedCommand = NormalizeCommandName(command);
+        var sudoAllowed = IsSudoCommand(normalizedCommand) && profile.AllowSudoCommand;
         var deniedCommands = options.DeniedCommands.Concat(profile.DeniedCommands);
-        if (IsDeniedCommand(normalizedCommand, deniedCommands))
+        if (!sudoAllowed && IsDeniedCommand(normalizedCommand, deniedCommands))
         {
             return Succeed(Denied($"Command '{command}' is explicitly denied."));
         }
@@ -94,7 +104,7 @@ public sealed class SshExecutionPolicy : ISshExecutionPolicy
             ? profile.AllowedCommands
             : options.AllowedCommands;
 
-        if (options.RequireExplicitProfileAllowlist && !IsAllowedCommand(normalizedCommand, allowedCommands))
+        if (options.RequireExplicitProfileAllowlist && !IsAllowedCommand(normalizedCommand, allowedCommands) && !sudoAllowed)
         {
             return Succeed(Denied($"Command '{command}' is not allowed for SSH profile '{profileName}'."));
         }
@@ -220,6 +230,9 @@ public sealed class SshExecutionPolicy : ISshExecutionPolicy
                normalizedCommand.Equals("powershell", StringComparison.OrdinalIgnoreCase) ||
                normalizedCommand.Equals("cmd", StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool IsSudoCommand(string normalizedCommand) =>
+        normalizedCommand.Equals("sudo", StringComparison.OrdinalIgnoreCase);
 
     private static bool ContainsInlineCommand(IEnumerable<string> arguments)
     {

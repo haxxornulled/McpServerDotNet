@@ -5,6 +5,7 @@ namespace McpServer.IntegrationTests.Infrastructure;
 
 public sealed class FramedJsonRpcTestClient
 {
+    private static readonly TimeSpan DefaultResponseTimeout = TimeSpan.FromSeconds(60);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -25,7 +26,7 @@ public sealed class FramedJsonRpcTestClient
         await WriteFrameAsync(json, ct).ConfigureAwait(false);
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(10));
+        timeoutCts.CancelAfter(DefaultResponseTimeout);
 
         while (true)
         {

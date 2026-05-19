@@ -5,6 +5,9 @@ using McpServer.AgentRouter.Domain.Shell;
 
 namespace McpServer.AgentRouter.Application.Shell;
 
+/// <summary>
+/// Evaluates shell execution requests against policy and workspace rules.
+/// </summary>
 public sealed class ShellExecutionPolicy : IShellExecutionPolicy
 {
     private static readonly string[] InlineCommandSwitches =
@@ -18,6 +21,9 @@ public sealed class ShellExecutionPolicy : IShellExecutionPolicy
     private readonly IAgentRouterRuntimePathResolver _pathResolver;
     private readonly AgentRouterRuntimeSettings _settings;
 
+    /// <summary>
+    /// Initializes a new shell execution policy.
+    /// </summary>
     public ShellExecutionPolicy(
         IAgentRouterRuntimePathResolver pathResolver,
         AgentRouterRuntimeSettings settings)
@@ -26,6 +32,9 @@ public sealed class ShellExecutionPolicy : IShellExecutionPolicy
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
 
+    /// <summary>
+    /// Evaluates the supplied shell request.
+    /// </summary>
     public ValueTask<Fin<ShellExecutionPolicyDecision>> EvaluateAsync(
         ShellExecutionRequest request,
         CancellationToken cancellationToken)

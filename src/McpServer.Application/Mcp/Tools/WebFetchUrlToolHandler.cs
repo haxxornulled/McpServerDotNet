@@ -8,9 +8,9 @@ using Microsoft.Extensions.Logging;
 
 namespace McpServer.Application.Mcp.Tools
 {
-    public sealed class WebFetchUrlToolHandler(
-        IWebAccessService webAccessService,
-        ILogger<WebFetchUrlToolHandler> logger) : IToolHandler<WebFetchUrlRequest>
+public sealed class WebFetchUrlToolHandler(
+    IWebFetchService webFetchService,
+    ILogger<WebFetchUrlToolHandler> logger) : IToolHandler<WebFetchUrlRequest>
     {
         public string Name => "web.fetch_url";
         public string Description => "Fetches the content of a URL.";
@@ -38,7 +38,7 @@ namespace McpServer.Application.Mcp.Tools
 
         public async ValueTask<Fin<CallToolResult>> Handle(WebFetchUrlRequest request, CancellationToken ct)
         {
-            var result = await webAccessService
+            var result = await webFetchService
                 .FetchUrlAsync(new FetchUrlCommand(
                     request.Url,
                     TimeoutSeconds: request.TimeoutSeconds), ct)

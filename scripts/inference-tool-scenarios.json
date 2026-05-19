@@ -64,6 +64,30 @@
     ]
   },
   {
+    "tool": "web.fetch_url",
+    "prompt": "Call web.fetch_url with url \"https://example.com/\" and timeout_seconds 30. Return the page title and text.",
+    "expectToolError": false,
+    "toolResultContains": [
+      "Example Domain"
+    ]
+  },
+  {
+    "tool": "web.search",
+    "prompt": "Call web.search with query \"Example Domain\" and maxResults 1.",
+    "expectToolError": false,
+    "toolResultContains": [
+      "example.com"
+    ]
+  },
+  {
+    "tool": "web.scrape_url",
+    "prompt": "Call web.scrape_url with url \"https://example.com/\", selector \"h1\", attribute \"href\", and maxResults 1.",
+    "expectToolError": false,
+    "toolResultContains": [
+      "Example Domain"
+    ]
+  },
+  {
     "tool": "shell.exec",
     "dependsOn": [
       "fs.move_path"

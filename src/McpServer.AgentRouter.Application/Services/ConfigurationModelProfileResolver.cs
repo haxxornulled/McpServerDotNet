@@ -6,15 +6,24 @@ using McpServer.AgentRouter.Domain.Inference;
 
 namespace McpServer.AgentRouter.Application.Services;
 
+/// <summary>
+/// Resolves model profiles from the configured runtime settings.
+/// </summary>
 public sealed class ConfigurationModelProfileResolver : IModelProfileResolver
 {
     private readonly AgentRouterRuntimeSettings _settings;
 
+    /// <summary>
+    /// Initializes a new configuration-backed profile resolver.
+    /// </summary>
     public ConfigurationModelProfileResolver(AgentRouterRuntimeSettings settings)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
 
+    /// <summary>
+    /// Resolves a profile by name.
+    /// </summary>
     public ValueTask<Fin<ModelProfile>> ResolveAsync(string? profileName, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -38,6 +47,9 @@ public sealed class ConfigurationModelProfileResolver : IModelProfileResolver
         return ValueTask.FromResult<Fin<ModelProfile>>(Fin<ModelProfile>.Succ(profile));
     }
 
+    /// <summary>
+    /// Lists all configured profiles.
+    /// </summary>
     public IReadOnlyList<ModelProfile> ListProfiles()
     {
         if (_settings.ModelProfiles.Count == 0)

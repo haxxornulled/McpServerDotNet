@@ -13,10 +13,10 @@ public sealed class WebSearchToolHandlerTests
     [Fact]
     public async Task Handle_Should_Return_Structured_Search_Summary()
     {
-        var web = Substitute.For<IWebAccessService>();
+        var web = Substitute.For<IWebSearchService>();
         var logger = Substitute.For<ILogger<WebSearchToolHandler>>();
 
-        web.SearchWebAsync(Arg.Any<McpServer.Application.Web.Commands.SearchWebCommand>(), Arg.Any<CancellationToken>())
+        web.SearchAsync(Arg.Any<McpServer.Application.Web.Commands.SearchWebCommand>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<Fin<IReadOnlyList<WebSearchResult>>>(
                 new[]
                 {
@@ -42,5 +42,27 @@ public sealed class WebSearchToolHandlerTests
         Assert.Equal(2, resultCountProperty!.GetValue(structured));
 
         Assert.Contains(dto.Content, item => item.Text.Contains("\"query\": \"hello world\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Handle_Should_Return_Failure_When_Search_Service_Fails()
+    {
+        var web = Substitute.For<IWebSearchService>();
+        var logger = Substitute.For<ILogger<WebSearchToolHandler>>();
+
+        web.SearchAsync(Arg.Any<McpServer.Application.Web.Commands.SearchWebCommand>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<Fin<IReadOnlyList<WebSearchResult>>>(
+                LanguageExt.Common.Error.New("web search failed")));
+
+        var handler = new WebSearchToolHandler(web, logger);
+
+        var result = await handler.Handle(new WebSearchRequest("hello world", 2), CancellationToken.None);
+
+        Assert.True(result.IsFail);
+        var error = result.Match(
+            Succ: _ => throw new InvalidOperationException("Expected failure."),
+            Fail: value => value);
+
+        Assert.Equal("web search failed", error.Message);
     }
 }

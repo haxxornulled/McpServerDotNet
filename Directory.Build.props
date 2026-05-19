@@ -12,7 +12,8 @@
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);1591;IDE0005;IDE0011</NoWarn>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);1587;1591</WarningsNotAsErrors>
+    <NoWarn>$(NoWarn);IDE0005;IDE0011;1591</NoWarn>
     <RestoreNoWarn>NU1507</RestoreNoWarn>
   </PropertyGroup>
 </Project>

@@ -8,12 +8,18 @@ using Microsoft.Extensions.Logging;
 
 namespace McpServer.AgentRouter.Application.AgentLoops;
 
+/// <summary>
+/// Dispatches agent loop steps to the MCP, shell, or SSH executor.
+/// </summary>
 public sealed class CompositeAgentToolExecutor : IAgentToolExecutor
 {
     private readonly McpAgentToolExecutor _mcpExecutor;
     private readonly ShellAgentToolExecutor _shellExecutor;
     private readonly SshAgentToolExecutor _sshExecutor;
 
+    /// <summary>
+    /// Initializes a new composite agent tool executor.
+    /// </summary>
     public CompositeAgentToolExecutor(
         McpAgentToolExecutor mcpExecutor,
         ShellAgentToolExecutor shellExecutor,
@@ -24,6 +30,9 @@ public sealed class CompositeAgentToolExecutor : IAgentToolExecutor
         _sshExecutor = sshExecutor ?? throw new ArgumentNullException(nameof(sshExecutor));
     }
 
+    /// <summary>
+    /// Routes the request to the correct executor.
+    /// </summary>
     public ValueTask<Fin<AgentToolExecutionResult>> ExecuteAsync(
         AgentToolExecutionRequest request,
         CancellationToken cancellationToken)
@@ -44,11 +53,17 @@ public sealed class CompositeAgentToolExecutor : IAgentToolExecutor
     }
 }
 
+/// <summary>
+/// Executes shell-backed agent loop steps.
+/// </summary>
 public sealed class ShellAgentToolExecutor : IAgentToolExecutor
 {
     private readonly IShellExecutionService _shellExecutionService;
     private readonly ILogger<ShellAgentToolExecutor> _logger;
 
+    /// <summary>
+    /// Initializes a new shell agent tool executor.
+    /// </summary>
     public ShellAgentToolExecutor(
         IShellExecutionService shellExecutionService,
         ILogger<ShellAgentToolExecutor> logger)
@@ -57,6 +72,9 @@ public sealed class ShellAgentToolExecutor : IAgentToolExecutor
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    /// <summary>
+    /// Executes the planned shell step.
+    /// </summary>
     public async ValueTask<Fin<AgentToolExecutionResult>> ExecuteAsync(
         AgentToolExecutionRequest request,
         CancellationToken cancellationToken)
@@ -202,11 +220,17 @@ public sealed class ShellAgentToolExecutor : IAgentToolExecutor
 }
 
 
+/// <summary>
+/// Executes SSH-backed agent loop steps.
+/// </summary>
 public sealed class SshAgentToolExecutor : IAgentToolExecutor
 {
     private readonly ISshExecutionService _sshExecutionService;
     private readonly ILogger<SshAgentToolExecutor> _logger;
 
+    /// <summary>
+    /// Initializes a new SSH agent tool executor.
+    /// </summary>
     public SshAgentToolExecutor(
         ISshExecutionService sshExecutionService,
         ILogger<SshAgentToolExecutor> logger)
@@ -215,6 +239,9 @@ public sealed class SshAgentToolExecutor : IAgentToolExecutor
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    /// <summary>
+    /// Executes the planned SSH step.
+    /// </summary>
     public async ValueTask<Fin<AgentToolExecutionResult>> ExecuteAsync(
         AgentToolExecutionRequest request,
         CancellationToken cancellationToken)

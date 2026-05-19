@@ -1,5 +1,6 @@
 using System.Text.Json;
 using McpServer.IntegrationTests.Infrastructure;
+using McpServer.Infrastructure.Ssh;
 using Xunit;
 
 namespace McpServer.IntegrationTests.Protocol;
@@ -177,6 +178,7 @@ public sealed class McpOptionalToolCoverageIntegrationTests
         var toolNames = McpStdioIntegrationTestSession.GetToolNames(listResponse);
         Assert.Contains("web.fetch_url", toolNames);
         Assert.Contains("web.search", toolNames);
+        Assert.Contains("web.scrape_url", toolNames);
 
         using var fetchResponse = await session.CallToolAsync("web.fetch_url", new
         {
@@ -198,6 +200,23 @@ public sealed class McpOptionalToolCoverageIntegrationTests
         Assert.Equal("MCP server protocol", searchJson.RootElement.GetProperty("query").GetString());
         Assert.Equal(1, searchJson.RootElement.GetProperty("result_count").GetInt32());
         Assert.Contains(web.RequestPaths, static path => path.StartsWith("/search", StringComparison.OrdinalIgnoreCase));
+
+        using var scrapeResponse = await session.CallToolAsync("web.scrape_url", new
+        {
+            url = web.ScrapeUrl,
+            selector = "article.card",
+            attribute = "data-id",
+            maxResults = 2,
+            timeout_seconds = 30
+        });
+        McpStdioIntegrationTestSession.AssertToolSucceeded(scrapeResponse, "web.scrape_url");
+        var scrapeText = ReadSingleTextContent(scrapeResponse);
+        using var scrapeJson = JsonDocument.Parse(scrapeText);
+        Assert.Equal(web.ScrapeUrl, scrapeJson.RootElement.GetProperty("url").GetString());
+        Assert.Equal("article.card", scrapeJson.RootElement.GetProperty("selector").GetString());
+        Assert.Equal(2, scrapeJson.RootElement.GetProperty("match_count").GetInt32());
+        Assert.Equal(2, scrapeJson.RootElement.GetProperty("matches").GetArrayLength());
+        Assert.Contains(web.RequestPaths, static path => path.StartsWith("/scrape", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -208,19 +227,39 @@ public sealed class McpOptionalToolCoverageIntegrationTests
         var command = Environment.GetEnvironmentVariable("MCPSERVER_INTEGRATION_SSH_COMMAND") ?? "pwd";
         var remoteWritePath = Environment.GetEnvironmentVariable("MCPSERVER_INTEGRATION_SSH_WRITE_PATH") ?? "/workspace/integration-output.txt";
         var backendRoot = CreateBackendRoot();
+        var sshConfigRoot = CreateSshConfigRoot();
+        var repoProfilesFilePath = Path.Combine(sshConfigRoot, "config", "mcpserver", "ssh-profiles.local.json");
+
+        FileSystemSshProfileStore.SaveProfiles(
+            sshConfigRoot,
+            "config/mcpserver/ssh-profiles.local.json",
+            [
+                new ConfiguredSshProfile(
+                    profileName,
+                    "loopback",
+                    22,
+                    "integration",
+                    PasswordEnvironmentVariable: null,
+                    PrivateKeyPath: null,
+                    PrivateKeyPassphraseEnvironmentVariable: null,
+                    WorkingDirectory: "/workspace",
+                    HostKeySha256: null,
+                    AcceptUnknownHostKey: true,
+                    AllowedCommands: [command, "sudo"],
+                    DeniedCommands: [],
+                    AllowedRemotePathPrefixes: ["/workspace"],
+                    AllowSudoCommand: true)
+            ]);
 
         var environment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
             ["MCPSERVER__SSH__ENABLED"] = "true",
             ["MCPSERVER__SSH__USETESTBACKEND"] = "true",
             ["MCPSERVER__SSH__TESTBACKENDROOTPATH"] = backendRoot,
-            ["MCPSERVER__SSH__PROFILES__0__NAME"] = profileName,
-            ["MCPSERVER__SSH__PROFILES__0__HOST"] = "loopback",
-            ["MCPSERVER__SSH__PROFILES__0__PORT"] = "22",
-            ["MCPSERVER__SSH__PROFILES__0__USERNAME"] = "integration",
-            ["MCPSERVER__SSH__PROFILES__0__WORKINGDIRECTORY"] = "/workspace",
-            ["MCPSERVER__SSH__PROFILES__0__ALLOWEDCOMMANDS__0"] = command,
-            ["MCPSERVER__SSH__PROFILES__0__ALLOWEDREMOTEPATHPREFIXES__0"] = "/workspace"
+            ["MCPSERVER__SSH__LOADREPOPROFILESFILE"] = "true",
+            ["MCPSERVER__SSH__REPOPROFILESFILEPATH"] = repoProfilesFilePath,
+            ["MCPSERVER__SSH__LOADUSERPROFILESFILE"] = "false",
+            ["MCPSERVER__SSH__ALLOWINLINEPROFILES"] = "false"
         };
 
         await using var session = await McpStdioIntegrationTestSession.StartInitializedAsync(HostProjectPath, workspaceRoot, environment);
@@ -239,6 +278,17 @@ public sealed class McpOptionalToolCoverageIntegrationTests
         var executeText = ReadSingleTextContent(executeResponse);
         Assert.Contains($"profile={profileName}", executeText, StringComparison.Ordinal);
         Assert.Contains($"command={command}", executeText, StringComparison.Ordinal);
+
+        using var sudoResponse = await session.CallToolAsync("ssh.execute", new
+        {
+            profile = profileName,
+            command = "sudo",
+            args = new[] { "whoami" }
+        });
+        McpStdioIntegrationTestSession.AssertToolSucceeded(sudoResponse, "ssh.execute");
+        var sudoText = ReadSingleTextContent(sudoResponse);
+        Assert.Contains($"profile={profileName}", sudoText, StringComparison.Ordinal);
+        Assert.Contains("command=sudo", sudoText, StringComparison.Ordinal);
 
         var content = $"McpServer integration test {DateTimeOffset.UtcNow:O}{Environment.NewLine}";
         using var writeResponse = await session.CallToolAsync("ssh.write_text", new
@@ -303,6 +353,13 @@ public sealed class McpOptionalToolCoverageIntegrationTests
     private static string CreateBackendRoot()
     {
         var root = Path.Combine(Path.GetTempPath(), "mcpserver-ssh-test-backend", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        return root;
+    }
+
+    private static string CreateSshConfigRoot()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "mcpserver-ssh-config", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         return root;
     }

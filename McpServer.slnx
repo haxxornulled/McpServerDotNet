@@ -12,4 +12,5 @@
   <Project Path="src/McpServer.AgentRouter.Host/McpServer.AgentRouter.Host.csproj" />
   <Project Path="tests/McpServer.AgentRouter.UnitTests/McpServer.AgentRouter.UnitTests.csproj" />
   <Project Path="tools/McpServer.AgentRouter.Tools/McpServer.AgentRouter.Tools.csproj" />
+  <Project Path="tools/McpServer.SshVaultCli/McpServer.SshVaultCli.csproj" />
 </Solution>

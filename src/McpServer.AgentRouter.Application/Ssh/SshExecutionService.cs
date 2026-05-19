@@ -6,6 +6,9 @@ using Microsoft.Extensions.Logging;
 
 namespace McpServer.AgentRouter.Application.Ssh;
 
+/// <summary>
+/// Coordinates SSH policy, execution, and tracing.
+/// </summary>
 public sealed class SshExecutionService : ISshExecutionService
 {
     private readonly ISshExecutionPolicy _policy;
@@ -13,6 +16,9 @@ public sealed class SshExecutionService : ISshExecutionService
     private readonly ISshExecutionTraceWriter _traceWriter;
     private readonly ILogger<SshExecutionService> _logger;
 
+    /// <summary>
+    /// Initializes a new SSH execution service.
+    /// </summary>
     public SshExecutionService(
         ISshExecutionPolicy policy,
         ISshCommandExecutor executor,
@@ -25,6 +31,9 @@ public sealed class SshExecutionService : ISshExecutionService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    /// <summary>
+    /// Executes the supplied SSH request end to end.
+    /// </summary>
     public async ValueTask<Fin<SshExecutionResponse>> ExecuteAsync(
         SshExecutionRequest? request,
         CancellationToken cancellationToken)

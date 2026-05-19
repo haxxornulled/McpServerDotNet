@@ -8,6 +8,9 @@ using McpServer.AgentRouter.Domain.Inference;
 
 namespace McpServer.AgentRouter.Application.AgentRuns;
 
+/// <summary>
+/// Coordinates bounded single-turn agent runs.
+/// </summary>
 public sealed class AgentRunService : IAgentRunService
 {
     private const string SystemPrompt = "You are the local MCPServer AgentRouter. Execute the requested development task as a bounded planning/generation run. Tool execution is not enabled in this milestone, so produce a concise, actionable result using only the supplied request context.";
@@ -17,6 +20,9 @@ public sealed class AgentRunService : IAgentRunService
     private readonly AgentRouterRuntimeSettings _settings;
     private readonly ILogger<AgentRunService> _logger;
 
+    /// <summary>
+    /// Initializes a new agent run service.
+    /// </summary>
     public AgentRunService(
         IModelRouter modelRouter,
         IAgentRunStore runStore,
@@ -29,6 +35,9 @@ public sealed class AgentRunService : IAgentRunService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    /// <summary>
+    /// Starts a new run, invokes the selected model, and persists the outcome.
+    /// </summary>
     public async ValueTask<Fin<AgentRun>> StartRunAsync(
         AgentRunRequest? request,
         CancellationToken cancellationToken)
@@ -100,6 +109,9 @@ public sealed class AgentRunService : IAgentRunService
         return Fin<AgentRun>.Succ(run);
     }
 
+    /// <summary>
+    /// Retrieves a previously stored run.
+    /// </summary>
     public ValueTask<Fin<AgentRun>> GetRunAsync(
         string runId,
         CancellationToken cancellationToken)

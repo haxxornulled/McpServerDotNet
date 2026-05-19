@@ -4,6 +4,7 @@ using LanguageExt.Common;
 using McpServer.Application.Abstractions.Mcp;
 using McpServer.Protocol.Shared;
 using McpServer.Protocol.Tools;
+using Microsoft.Extensions.Logging;
 
 namespace McpServer.Protocol.Routing;
 
@@ -11,9 +12,12 @@ public sealed class ToolCallRouter
 {
     private readonly IReadOnlyDictionary<string, IToolHandler> _handlers;
     private readonly ToolDto[] _tools;
+    private readonly ILogger<ToolCallRouter> _logger;
 
-    public ToolCallRouter(IEnumerable<IToolHandler> handlers)
+    public ToolCallRouter(IEnumerable<IToolHandler> handlers, ILogger<ToolCallRouter> logger)
     {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
         var handlerArray = handlers
             .OrderBy(static handler => handler.Name, StringComparer.Ordinal)
             .ToArray();
@@ -50,10 +54,22 @@ public sealed class ToolCallRouter
             return ToToolErrorDto(name, "unknown_tool", $"Unknown tool: {name}");
         }
 
-        var appResult = await handler.Handle(arguments, ct).ConfigureAwait(false);
-        return appResult.Match<Fin<CallToolResultDto>>(
-            Succ: result => Fin<CallToolResultDto>.Succ(ToCallToolDto(result)),
-            Fail: error => ToToolErrorDto(name, "tool_execution_failed", error.Message));
+        try
+        {
+            var appResult = await handler.Handle(arguments, ct).ConfigureAwait(false);
+            return appResult.Match<Fin<CallToolResultDto>>(
+                Succ: result => Fin<CallToolResultDto>.Succ(ToCallToolDto(result)),
+                Fail: error => ToToolErrorDto(name, "tool_execution_failed", error.Message));
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unhandled exception while executing MCP tool {ToolName}", name);
+            return ToToolErrorDto(name, "tool_execution_failed", ex.Message);
+        }
     }
 
     private static ToolDto ToToolDto(IToolHandler handler) =>

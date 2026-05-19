@@ -5,15 +5,24 @@ using McpServer.AgentRouter.Domain.Mcp;
 
 namespace McpServer.AgentRouter.Application.Mcp;
 
+/// <summary>
+/// Applies configuration-based policy checks to MCP tool calls.
+/// </summary>
 public sealed class McpToolCallPolicy : IMcpToolCallPolicy
 {
     private readonly AgentRouterRuntimeSettings _settings;
 
+    /// <summary>
+    /// Initializes a new MCP tool call policy.
+    /// </summary>
     public McpToolCallPolicy(AgentRouterRuntimeSettings settings)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
 
+    /// <summary>
+    /// Evaluates the supplied MCP tool call command.
+    /// </summary>
     public ValueTask<Fin<McpToolCallPolicyDecision>> EvaluateAsync(
         McpToolCallCommand command,
         CancellationToken cancellationToken)

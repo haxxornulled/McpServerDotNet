@@ -5,15 +5,24 @@ using McpServer.AgentRouter.Domain.AgentLoops;
 
 namespace McpServer.AgentRouter.Application.AgentLoops;
 
+/// <summary>
+/// Enforces loop execution allowlisting rules.
+/// </summary>
 public sealed class ExplicitAllowlistToolExecutionPolicy : IToolExecutionPolicy
 {
     private readonly AgentRouterRuntimeSettings _settings;
 
+    /// <summary>
+    /// Initializes a new explicit allowlist policy.
+    /// </summary>
     public ExplicitAllowlistToolExecutionPolicy(AgentRouterRuntimeSettings settings)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
     }
 
+    /// <summary>
+    /// Evaluates whether the planned step may execute.
+    /// </summary>
     public ValueTask<Fin<ToolExecutionPolicyDecision>> EvaluateAsync(
         AgentLoopExecutionContext context,
         AgentPlannedStep plannedStep,

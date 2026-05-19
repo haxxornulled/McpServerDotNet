@@ -2,11 +2,17 @@ using McpServer.AgentRouter.Application.Abstractions;
 
 namespace McpServer.AgentRouter.Application.Runtime;
 
+/// <summary>
+/// Resolves file-system paths relative to the active AgentRouter content root.
+/// </summary>
 public sealed class AgentRouterRuntimePathResolver : IAgentRouterRuntimePathResolver
 {
     private readonly object _sync = new();
     private string? _contentRootOverride;
 
+    /// <summary>
+    /// Pushes a temporary content root for relative path resolution.
+    /// </summary>
     public IDisposable PushContentRoot(string contentRootPath)
     {
         if (string.IsNullOrWhiteSpace(contentRootPath))
@@ -26,6 +32,9 @@ public sealed class AgentRouterRuntimePathResolver : IAgentRouterRuntimePathReso
         return new Scope(this, previous);
     }
 
+    /// <summary>
+    /// Resolves a configured path or the supplied default path against the active content root.
+    /// </summary>
     public string ResolveConfiguredPath(
         string? configuredPath,
         string defaultPath)
@@ -37,6 +46,9 @@ public sealed class AgentRouterRuntimePathResolver : IAgentRouterRuntimePathReso
         return ResolveRelativeToContentRoot(value);
     }
 
+    /// <summary>
+    /// Resolves a path relative to the current content root or the application base directory.
+    /// </summary>
     public string ResolveRelativeToContentRoot(string path)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -70,6 +82,9 @@ public sealed class AgentRouterRuntimePathResolver : IAgentRouterRuntimePathReso
         private readonly string? _previous;
         private bool _disposed;
 
+        /// <summary>
+        /// Initializes a scope that restores the previous content root on dispose.
+        /// </summary>
         public Scope(
             AgentRouterRuntimePathResolver owner,
             string? previous)

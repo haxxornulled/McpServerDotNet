@@ -54,6 +54,43 @@ public sealed class SshServiceTests
             Fail: failure => failure.Message);
         Assert.Contains("shell control characters", error, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ExecuteAsync_Should_Allow_Sudo_When_Profile_Opts_In()
+    {
+        var logger = Substitute.For<ILogger<TestSshService>>();
+        var backendRoot = Path.Combine(Path.GetTempPath(), $"mcpserver-ssh-test-{Guid.NewGuid():N}");
+        var sut = new TestSshService(
+            [
+                new ConfiguredSshProfile(
+                    "lab",
+                    "127.0.0.1",
+                    22,
+                    "tester",
+                    PasswordEnvironmentVariable: null,
+                    PrivateKeyPath: null,
+                    PrivateKeyPassphraseEnvironmentVariable: null,
+                    WorkingDirectory: null,
+                    HostKeySha256: "SHA256:dGVzdA",
+                    AcceptUnknownHostKey: false,
+                    AllowedCommands: ["hostname"],
+                    DeniedCommands: ["rm", "sudo"],
+                    AllowedRemotePathPrefixes: [],
+                    AllowSudoCommand: true)
+            ],
+            backendRoot,
+            logger);
+
+        var result = await sut.ExecuteAsync(new("lab", "sudo", null, ["whoami"]), CancellationToken.None);
+
+        Assert.True(result.IsSucc);
+        var execution = result.Match(
+            Succ: value => value,
+            Fail: failure => throw new InvalidOperationException(failure.Message));
+        Assert.Equal("sudo", execution.Command);
+        Assert.Contains("command=sudo", execution.StandardOutput, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ExecuteAsync_Should_Require_Command_Allowlist_Before_Attempting_Connection()
     {

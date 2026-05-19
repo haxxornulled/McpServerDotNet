@@ -47,7 +47,7 @@ public sealed class StdioTestServerProcess : IAsyncDisposable
         var psi = new ProcessStartInfo
         {
             FileName = "dotnet",
-            Arguments = $"run --project \"{projectPath}\" -c {configuration} --no-build",
+            Arguments = $"run --project \"{projectPath}\" -c {configuration} --no-build --no-launch-profile",
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,

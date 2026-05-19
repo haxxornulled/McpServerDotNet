@@ -1,5 +1,6 @@
 using System.Text.Json;
 using LanguageExt;
+using McpServer.Application.Abstractions.Mcp;
 using McpServer.Application.Abstractions.Execution;
 using McpServer.Application.Abstractions.Files;
 using McpServer.Application.Abstractions.Ssh;
@@ -33,7 +34,7 @@ public sealed class ToolCallRouterTests
         var result = router.ListTools();
         var names = result.Tools.Select(tool => tool.Name).ToArray();
 
-        Assert.Equal(24, names.Length);
+        Assert.Equal(25, names.Length);
         Assert.Contains("fs.write_text", names);
         Assert.Contains("fs.append_text", names);
         Assert.Contains("fs.read_file", names);
@@ -58,6 +59,7 @@ public sealed class ToolCallRouterTests
         Assert.Contains("ssh.write_text", names);
         Assert.Contains("web.fetch_url", names);
         Assert.Contains("web.search", names);
+        Assert.Contains("web.scrape_url", names);
         Assert.DoesNotContain("ssh.exec", names);
         Assert.DoesNotContain("web.fetch", names);
     }
@@ -337,20 +339,47 @@ public sealed class ToolCallRouterTests
         Assert.NotNull(dto.StructuredContent);
     }
 
+    [Fact]
+    public async Task RouteAsync_Should_Log_And_Return_Tool_Error_When_Handler_Throws()
+    {
+        var logger = new RecordingLogger<ToolCallRouter>();
+        var router = new ToolCallRouter([new ThrowingToolHandler()], logger);
+
+        var result = await router.RouteAsync("boom.tool", JsonSerializer.SerializeToElement(new { }), CancellationToken.None);
+
+        Assert.True(result.IsSucc);
+        var dto = result.Match(
+            Succ: value => value,
+            Fail: error => throw new InvalidOperationException(error.Message));
+
+        Assert.True(dto.IsError);
+        Assert.Contains("tool exploded", dto.Content[0].Text, StringComparison.Ordinal);
+        Assert.Contains(logger.Entries, entry =>
+            entry.Level == LogLevel.Error &&
+            entry.Message.Contains("boom.tool", StringComparison.OrdinalIgnoreCase) &&
+            entry.Exception is InvalidOperationException);
+    }
+
     private static ToolCallRouter CreateRouter(
         IFileSystemService? fileSystemService = null,
         IProcessExecutionService? processExecutionService = null,
-        IWebAccessService? webAccessService = null,
+        IWebFetchService? webFetchService = null,
+        IWebSearchService? webSearchService = null,
+        IWebScrapeService? webScrapeService = null,
         ISshService? sshService = null,
         IPathPolicy? pathPolicy = null,
-        IResourcePathTranslator? resourcePathTranslator = null)
+        IResourcePathTranslator? resourcePathTranslator = null,
+        ILogger<ToolCallRouter>? toolRouterLogger = null)
     {
         fileSystemService ??= Substitute.For<IFileSystemService>();
         processExecutionService ??= Substitute.For<IProcessExecutionService>();
-        webAccessService ??= Substitute.For<IWebAccessService>();
+        webFetchService ??= Substitute.For<IWebFetchService>();
+        webSearchService ??= Substitute.For<IWebSearchService>();
+        webScrapeService ??= Substitute.For<IWebScrapeService>();
         sshService ??= Substitute.For<ISshService>();
         pathPolicy ??= Substitute.For<IPathPolicy>();
         resourcePathTranslator ??= Substitute.For<IResourcePathTranslator>();
+        toolRouterLogger ??= Substitute.For<ILogger<ToolCallRouter>>();
         var shellPolicy = new ShellExecutionPolicy(new ShellExecutionPolicyOptions(true, true, ["dotnet", "git", "dir", "ls"], [], 300, 200000));
 
         return new ToolCallRouter(
@@ -377,8 +406,53 @@ public sealed class ToolCallRouterTests
             new ShellExecToolHandler(processExecutionService, Substitute.For<ILogger<ShellExecToolHandler>>(), shellPolicy),
             new SshExecuteToolHandler(sshService, Substitute.For<ILogger<SshExecuteToolHandler>>()),
             new SshWriteTextToolHandler(sshService, Substitute.For<ILogger<SshWriteTextToolHandler>>()),
-            new WebFetchUrlToolHandler(webAccessService, Substitute.For<ILogger<WebFetchUrlToolHandler>>()),
-            new WebSearchToolHandler(webAccessService, Substitute.For<ILogger<WebSearchToolHandler>>())
-        ]);
+            new WebFetchUrlToolHandler(webFetchService, Substitute.For<ILogger<WebFetchUrlToolHandler>>()),
+            new WebSearchToolHandler(webSearchService, Substitute.For<ILogger<WebSearchToolHandler>>()),
+            new WebScrapeUrlToolHandler(webScrapeService, Substitute.For<ILogger<WebScrapeUrlToolHandler>>())
+        ], toolRouterLogger);
+    }
+
+    private sealed class ThrowingToolHandler : IToolHandler
+    {
+        private static readonly JsonElement Schema = JsonSerializer.SerializeToElement(new
+        {
+            type = "object",
+            additionalProperties = false,
+            properties = new { }
+        });
+
+        public string Name => "boom.tool";
+
+        public string Description => "Throws on execution.";
+
+        public JsonElement GetInputSchema() => Schema;
+
+        public ValueTask<Fin<CallToolResult>> Handle(JsonElement arguments, CancellationToken ct)
+        {
+            throw new InvalidOperationException("tool exploded");
+        }
+    }
+
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        public List<(LogLevel Level, string Message, Exception? Exception)> Entries { get; } = [];
+
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            Entries.Add((logLevel, formatter(state, exception), exception));
+        }
+
+        private sealed class NullScope : IDisposable
+        {
+            public static readonly NullScope Instance = new();
+
+            public void Dispose()
+            {
+            }
+        }
     }
 }

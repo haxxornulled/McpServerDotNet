@@ -23,8 +23,16 @@ This folder contains the supported repo-local operational scripts for both hosts
 | --- | --- |
 | `Start-AgentRouterStack.ps1` | Starts the preferred local AgentRouter stack, including runtime prerequisites |
 | `Stop-AgentRouterStack.ps1` | Stops the local AgentRouter stack |
-| `Test-AgentRouter.ps1` | Runs the standard AgentRouter smoke checks, including streaming chat completion coverage |
+| `Test-AgentRouter.ps1` | Runs the basic AgentRouter HTTP smoke checks, including streaming chat completion coverage |
 | `Stress-AgentRouter.ps1` | Runs bounded AgentRouter concurrency/stress validation |
+
+`Start-AgentRouterStack.ps1` writes AgentRouter stdout/stderr to `.run/logs/` when launched in `-NoNewWindows` mode and prints the tail of those logs if the `/health` readiness check times out. That makes startup failures much easier to diagnose without changing the normal startup path.
+
+`Invoke-InferenceToolSmokeTest.ps1` and `Test-StdioFramedMcp.ps1` both pin the repository workspace root explicitly. Run them from the repo root so the workspace and allowed-root settings line up with the configured harness instead of the shell current directory.
+
+When you pass `-RunSmoke` to `Start-AgentRouterStack.ps1`, it now uses the typed .NET harness in `tools/McpServer.AgentRouter.Tools`, widens the AgentRouter tool allowlist only for that smoke process, and runs the loopback web scrape coverage alongside the full default MCP tool suite.
+
+Pass `-EnableSshSmoke` to include SSH coverage in that same typed harness. Set the repo-local SSH password environment variable in your shell before launching the stack for a real host run. The script now fails fast if the SSH profile's required secret is not present in the launching shell.
 
 The typed .NET harness in `tools/McpServer.AgentRouter.Tools` is the preferred higher-fidelity smoke/stress path when you want structured reports instead of PowerShell-only output.
 

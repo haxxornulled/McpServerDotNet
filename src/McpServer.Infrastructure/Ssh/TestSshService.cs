@@ -201,10 +201,11 @@ public sealed class TestSshService(
         }
 
         var executable = ExtractExecutableName(command.Command);
+        var sudoAllowed = IsSudoCommand(executable) && profile.AllowSudoCommand;
         var deniedCommands = new System.Collections.Generic.HashSet<string>(
             profile.DeniedCommands.Where(static value => !string.IsNullOrWhiteSpace(value)),
             StringComparer.OrdinalIgnoreCase);
-        if (deniedCommands.Contains(executable))
+        if (!sudoAllowed && deniedCommands.Contains(executable))
         {
             return Error.New($"SSH command '{executable}' is denied by profile '{profile.Name}'.");
         }
@@ -217,13 +218,16 @@ public sealed class TestSshService(
             return Error.New($"SSH profile '{profile.Name}' requires an explicit command allowlist.");
         }
 
-        if (!allowedCommands.Contains(executable))
+        if (!allowedCommands.Contains(executable) && !sudoAllowed)
         {
             return Error.New($"SSH command '{executable}' is not in the allowlist for profile '{profile.Name}'.");
         }
 
         return LanguageExt.Prelude.unit;
     }
+
+    private static bool IsSudoCommand(string executable) =>
+        executable.Equals("sudo", StringComparison.OrdinalIgnoreCase);
 
     private string MapRemotePath(string remotePath)
     {

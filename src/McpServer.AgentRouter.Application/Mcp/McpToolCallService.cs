@@ -8,6 +8,9 @@ using Microsoft.Extensions.Logging;
 
 namespace McpServer.AgentRouter.Application.Mcp;
 
+/// <summary>
+/// Coordinates MCP tool call policy, transport, and tracing.
+/// </summary>
 public sealed class McpToolCallService : IMcpToolCallService
 {
     private static readonly JsonElement EmptyArguments = JsonSerializer.SerializeToElement(new { });
@@ -18,6 +21,9 @@ public sealed class McpToolCallService : IMcpToolCallService
     private readonly AgentRouterRuntimeSettings _settings;
     private readonly ILogger<McpToolCallService> _logger;
 
+    /// <summary>
+    /// Initializes a new MCP tool call service.
+    /// </summary>
     public McpToolCallService(
         IMcpToolCallPolicy policy,
         IMcpToolCallClient client,
@@ -32,6 +38,9 @@ public sealed class McpToolCallService : IMcpToolCallService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    /// <summary>
+    /// Executes an MCP tool call request end to end.
+    /// </summary>
     public async ValueTask<Fin<McpToolCallResponse>> CallToolAsync(
         McpToolCallRequest? request,
         CancellationToken cancellationToken)

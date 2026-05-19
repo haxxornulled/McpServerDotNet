@@ -13,7 +13,7 @@ public sealed class WebFetchToolHandlerTests
     [Fact]
     public async Task Handle_Should_Return_Text_Content()
     {
-        var web = Substitute.For<IWebAccessService>();
+        var web = Substitute.For<IWebFetchService>();
         var logger = Substitute.For<ILogger<WebFetchUrlToolHandler>>();
 
         web.FetchUrlAsync(Arg.Any<McpServer.Application.Web.Commands.FetchUrlCommand>(), Arg.Any<CancellationToken>())
