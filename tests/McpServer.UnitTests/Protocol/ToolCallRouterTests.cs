@@ -10,6 +10,7 @@ using McpServer.Application.Execution.Commands;
 using McpServer.Application.Execution.Results;
 using McpServer.Application.Files.Commands;
 using McpServer.Application.Files.Results;
+using McpServer.Application.Files;
 using McpServer.Application.Mcp.Tools;
 using McpServer.Application.Activities;
 using McpServer.Application.Ssh.Commands;
@@ -218,6 +219,7 @@ public sealed class ToolCallRouterTests
                 Succ: value => value,
                 Fail: error => throw new InvalidOperationException(error.Message));
 
+            Assert.False(dto.IsError, string.Join(Environment.NewLine, dto.Content.Select(x => x.Text)));
             var structured = Assert.IsType<WorkspaceSelectFolderResult>(dto.StructuredContent);
             Assert.Equal(Path.Combine(root, "apps"), structured.ProjectRoot);
             Assert.Contains(structured.Folders, folder => folder.Name == "sub");
@@ -369,6 +371,7 @@ public sealed class ToolCallRouterTests
         ISshService? sshService = null,
         IPathPolicy? pathPolicy = null,
         IResourcePathTranslator? resourcePathTranslator = null,
+        McpServer.Domain.Workspace.IWorkspaceMutationService? workspaceMutationService = null,
         ILogger<ToolCallRouter>? toolRouterLogger = null)
     {
         fileSystemService ??= Substitute.For<IFileSystemService>();
@@ -379,8 +382,9 @@ public sealed class ToolCallRouterTests
         sshService ??= Substitute.For<ISshService>();
         pathPolicy ??= Substitute.For<IPathPolicy>();
         resourcePathTranslator ??= Substitute.For<IResourcePathTranslator>();
+        workspaceMutationService ??= new WorkspaceMutationService(pathPolicy, resourcePathTranslator);
         toolRouterLogger ??= Substitute.For<ILogger<ToolCallRouter>>();
-        var shellPolicy = new ShellExecutionPolicy(new ShellExecutionPolicyOptions(true, true, ["dotnet", "git", "dir", "ls"], [], 300, 200000));
+        var shellPolicy = new ShellExecutionPolicy(new ShellExecutionPolicyOptions(true, ["dotnet", "git", "dir", "bash"], [], 300, 200000));
 
         return new ToolCallRouter(
         [
@@ -394,9 +398,9 @@ public sealed class ToolCallRouterTests
             new FsMovePathToolHandler(fileSystemService, Substitute.For<ILogger<FsMovePathToolHandler>>()),
             new FsCopyPathToolHandler(fileSystemService, Substitute.For<ILogger<FsCopyPathToolHandler>>()),
             new FsDeletePathToolHandler(fileSystemService, Substitute.For<ILogger<FsDeletePathToolHandler>>()),
-            new WorkspaceSetRootToolHandler(pathPolicy, resourcePathTranslator, Substitute.For<ILogger<WorkspaceSetRootToolHandler>>()),
-            new WorkspaceOpenToolHandler(pathPolicy, resourcePathTranslator, Substitute.For<ILogger<WorkspaceOpenToolHandler>>()),
-            new WorkspaceSelectFolderToolHandler(fileSystemService, pathPolicy, resourcePathTranslator, Substitute.For<ILogger<WorkspaceSelectFolderToolHandler>>()),
+            new WorkspaceSetRootToolHandler(workspaceMutationService, Substitute.For<ILogger<WorkspaceSetRootToolHandler>>(), pathPolicy),
+            new WorkspaceOpenToolHandler(workspaceMutationService, Substitute.For<ILogger<WorkspaceOpenToolHandler>>(), pathPolicy),
+            new WorkspaceSelectFolderToolHandler(fileSystemService, workspaceMutationService, pathPolicy, Substitute.For<ILogger<WorkspaceSelectFolderToolHandler>>()),
             new WorkspaceStatusToolHandler(pathPolicy, Substitute.For<ILogger<WorkspaceStatusToolHandler>>()),
             new WorkspaceInspectToolHandler(pathPolicy, Substitute.For<ILogger<WorkspaceInspectToolHandler>>()),
             new ActivityRouteToolHandler(new RuleFirstActivityRouter(new ActivityProfileRegistry()), Substitute.For<ILogger<ActivityRouteToolHandler>>()),

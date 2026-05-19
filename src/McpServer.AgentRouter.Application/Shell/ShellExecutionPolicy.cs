@@ -202,8 +202,6 @@ public sealed class ShellExecutionPolicy : IShellExecutionPolicy
     {
         return normalizedCommand.Equals("bash", StringComparison.OrdinalIgnoreCase) ||
                normalizedCommand.Equals("sh", StringComparison.OrdinalIgnoreCase) ||
-               normalizedCommand.Equals("pwsh", StringComparison.OrdinalIgnoreCase) ||
-               normalizedCommand.Equals("powershell", StringComparison.OrdinalIgnoreCase) ||
                normalizedCommand.Equals("cmd", StringComparison.OrdinalIgnoreCase);
     }
 

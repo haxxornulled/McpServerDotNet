@@ -174,21 +174,17 @@ public static class FileSystemSshProfileStore
 
         public string Username { get; set; } = string.Empty;
 
-        public string? PasswordEnvironmentVariable { get; set; }
-
         public string? PrivateKeyPath { get; set; }
 
-        public string? PrivateKeyPassphraseEnvironmentVariable { get; set; }
+        public string? PasswordVaultItemName { get; set; }
+
+        public string? PrivateKeyPassphraseVaultItemName { get; set; }
 
         public string? WorkingDirectory { get; set; }
 
         public string? HostKeySha256 { get; set; }
 
         public bool AcceptUnknownHostKey { get; set; }
-
-        public SshCredentialSecret? PasswordSecret { get; set; }
-
-        public string? PasswordVaultItemName { get; set; }
 
         public IList<string> AllowedCommands { get; set; } = [];
 
@@ -207,14 +203,12 @@ public static class FileSystemSshProfileStore
             Host = profile.Host,
             Port = profile.Port,
             Username = profile.Username,
-            PasswordEnvironmentVariable = profile.PasswordEnvironmentVariable,
             PrivateKeyPath = profile.PrivateKeyPath,
-            PrivateKeyPassphraseEnvironmentVariable = profile.PrivateKeyPassphraseEnvironmentVariable,
+            PasswordVaultItemName = profile.PasswordVaultItemName,
+            PrivateKeyPassphraseVaultItemName = profile.PrivateKeyPassphraseVaultItemName,
             WorkingDirectory = profile.WorkingDirectory,
             HostKeySha256 = profile.HostKeySha256,
             AcceptUnknownHostKey = profile.AcceptUnknownHostKey,
-            PasswordSecret = profile.PasswordSecret,
-            PasswordVaultItemName = profile.PasswordVaultItemName,
             AllowedCommands = profile.AllowedCommands.ToList(),
             DeniedCommands = profile.DeniedCommands.ToList(),
             AllowedRemotePathPrefixes = profile.AllowedRemotePathPrefixes.ToList(),
@@ -229,19 +223,15 @@ public static class FileSystemSshProfileStore
             profile.Host,
             profile.Port,
             profile.Username,
-            profile.PasswordEnvironmentVariable,
             profile.PrivateKeyPath,
-            profile.PrivateKeyPassphraseEnvironmentVariable,
+            profile.PasswordVaultItemName,
+            profile.PrivateKeyPassphraseVaultItemName,
             profile.WorkingDirectory,
             profile.HostKeySha256,
             profile.AcceptUnknownHostKey,
             profile.AllowedCommands.ToArray(),
             profile.DeniedCommands.ToArray(),
             profile.AllowedRemotePathPrefixes.ToArray(),
-            profile.AllowSudoCommand)
-        {
-            PasswordSecret = profile.PasswordSecret,
-            PasswordVaultItemName = profile.PasswordVaultItemName
-        };
+            profile.AllowSudoCommand);
     }
 }

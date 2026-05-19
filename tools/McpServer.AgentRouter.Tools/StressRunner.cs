@@ -454,6 +454,8 @@ internal sealed class StressRunner
             working_directory = _settings.SshWorkingDirectory
         };
 
+        Action<JsonNode?>? responseObserver = _reporter.WriteSshExecutionResponse;
+
         return await InvokeJsonWorkloadAsync(
             "SSH execution",
             index,
@@ -463,7 +465,8 @@ internal sealed class StressRunner
             CreateSshExecutionPreview,
             json => string.Equals(JsonFieldReader.GetString(json, "status"), "completed", StringComparison.OrdinalIgnoreCase)
                 && (JsonFieldReader.GetBoolean(json, "allowed") ?? false),
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            responseObserver).ConfigureAwait(false);
     }
 
     private async Task<StressRequestResult> InvokeJsonWorkloadAsync(

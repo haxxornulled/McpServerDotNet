@@ -1,14 +1,13 @@
 {
   "profiles": {
     "dev": {
-      "name": "dev",
       "host": "192.168.1.50",
       "port": 22,
       "username": "deploy",
+      "passwordVaultItemName": "dev",
       "workingDirectory": "/tmp",
       "acceptUnknownHostKey": false,
       "hostKeySha256": "SHA256:REPLACE_ME",
-      "passwordVaultItemName": "dev",
       "allowedCommands": [
         "pwd",
         "whoami",
@@ -22,21 +21,19 @@
       ]
     },
     "dev-admin": {
-      "name": "dev-admin",
       "host": "192.168.1.50",
       "port": 22,
       "username": "deploy",
+      "passwordVaultItemName": "dev-admin",
       "workingDirectory": "/home/deploy",
       "acceptUnknownHostKey": false,
       "hostKeySha256": "SHA256:REPLACE_ME",
-      "passwordVaultItemName": "dev-admin",
       "allowedCommands": [
         "pwd",
         "whoami",
         "hostname",
         "uname",
-        "uptime",
-        "sudo"
+        "uptime"
       ],
       "allowedRemotePathPrefixes": [
         "/tmp",

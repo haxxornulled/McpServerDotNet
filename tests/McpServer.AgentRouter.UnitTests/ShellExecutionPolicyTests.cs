@@ -108,7 +108,7 @@ public sealed class ShellExecutionPolicyTests
             WorkingDirectoryRoot = workspaceRoot,
             AllowWorkingDirectoryOutsideRoot = false,
             AllowShellInterpreterInlineCommands = false,
-            AllowedCommands = new HashSet<string>(["dotnet", "git", "pwsh", "bash"], StringComparer.OrdinalIgnoreCase),
+            AllowedCommands = new HashSet<string>(["dotnet", "git", "dir", "bash"], StringComparer.OrdinalIgnoreCase),
             DeniedCommands = new HashSet<string>(["rm", "sudo"], StringComparer.OrdinalIgnoreCase),
             WriteTraceFiles = false,
             TraceRootPath = Path.Combine("workspace", "artifacts", "shell-exec")

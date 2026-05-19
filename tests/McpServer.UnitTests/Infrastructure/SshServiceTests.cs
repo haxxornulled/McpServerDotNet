@@ -33,14 +33,14 @@ public sealed class SshServiceTests
                     "127.0.0.1",
                     22,
                     "tester",
-                    PasswordEnvironmentVariable: null,
                     PrivateKeyPath: null,
-                    PrivateKeyPassphraseEnvironmentVariable: null,
+                    PasswordVaultItemName: "lab",
+                    PrivateKeyPassphraseVaultItemName: null,
                     WorkingDirectory: null,
                     HostKeySha256: "SHA256:dGVzdA",
                     AcceptUnknownHostKey: false,
                     AllowedCommands: ["hostname"],
-                    DeniedCommands: ["sh", "bash", "pwsh", "powershell"],
+                    DeniedCommands: ["sh", "bash"],
                     AllowedRemotePathPrefixes: [])
             ],
             AppContext.BaseDirectory,
@@ -56,6 +56,39 @@ public sealed class SshServiceTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_Should_Fail_When_Username_Is_Missing_Before_Attempting_Connection()
+    {
+        var logger = Substitute.For<ILogger<SshService>>();
+        var sut = new SshService(
+            [
+                new ConfiguredSshProfile(
+                    "lab",
+                    "127.0.0.1",
+                    22,
+                    string.Empty,
+                    PrivateKeyPath: null,
+                    PasswordVaultItemName: "lab",
+                    PrivateKeyPassphraseVaultItemName: null,
+                    WorkingDirectory: null,
+                    HostKeySha256: "SHA256:dGVzdA",
+                    AcceptUnknownHostKey: false,
+                    AllowedCommands: ["hostname"],
+                    DeniedCommands: ["sh", "bash"],
+                    AllowedRemotePathPrefixes: [])
+            ],
+            AppContext.BaseDirectory,
+            logger);
+
+        var result = await sut.ExecuteAsync(new("lab", "hostname"), CancellationToken.None);
+
+        Assert.True(result.IsFail);
+        var error = result.Match(
+            Succ: _ => throw new InvalidOperationException("Expected SSH execution to fail for a missing username."),
+            Fail: failure => failure.Message);
+        Assert.Contains("missing Username", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_Should_Allow_Sudo_When_Profile_Opts_In()
     {
         var logger = Substitute.For<ILogger<TestSshService>>();
@@ -67,9 +100,9 @@ public sealed class SshServiceTests
                     "127.0.0.1",
                     22,
                     "tester",
-                    PasswordEnvironmentVariable: null,
                     PrivateKeyPath: null,
-                    PrivateKeyPassphraseEnvironmentVariable: null,
+                    PasswordVaultItemName: "lab",
+                    PrivateKeyPassphraseVaultItemName: null,
                     WorkingDirectory: null,
                     HostKeySha256: "SHA256:dGVzdA",
                     AcceptUnknownHostKey: false,
@@ -102,9 +135,9 @@ public sealed class SshServiceTests
                     "127.0.0.1",
                     22,
                     "tester",
-                    PasswordEnvironmentVariable: null,
                     PrivateKeyPath: null,
-                    PrivateKeyPassphraseEnvironmentVariable: null,
+                    PasswordVaultItemName: "lab",
+                    PrivateKeyPassphraseVaultItemName: null,
                     WorkingDirectory: null,
                     HostKeySha256: "SHA256:dGVzdA",
                     AcceptUnknownHostKey: false,
@@ -122,6 +155,46 @@ public sealed class SshServiceTests
             Succ: _ => throw new InvalidOperationException("Expected SSH command validation to fail."),
             Fail: failure => failure.Message);
         Assert.Contains("requires an explicit command allowlist", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Should_Fail_When_Password_Vault_Item_Resolves_To_Empty_Secret()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"mcpserver-ssh-service-empty-{Guid.NewGuid():N}");
+        var vaultPath = Path.Combine(root, "ssh-vault.json");
+        var vaultKeyPath = Path.Combine(root, "ssh-vault.key");
+        var store = new SshCredentialVaultStore(vaultPath, vaultKeyPath, root);
+        store.UpsertEntry("lab", string.Empty);
+
+        var logger = Substitute.For<ILogger<SshService>>();
+        var sut = new SshService(
+            [
+                new ConfiguredSshProfile(
+                    "lab",
+                    "127.0.0.1",
+                    22,
+                    "tester",
+                    PrivateKeyPath: null,
+                    PasswordVaultItemName: "lab",
+                    PrivateKeyPassphraseVaultItemName: null,
+                    WorkingDirectory: null,
+                    HostKeySha256: "SHA256:dGVzdA",
+                    AcceptUnknownHostKey: true,
+                    AllowedCommands: ["hostname"],
+                    DeniedCommands: [],
+                    AllowedRemotePathPrefixes: [] )
+            ],
+            AppContext.BaseDirectory,
+            logger,
+            store);
+
+        var result = await sut.ExecuteAsync(new("lab", "hostname"), CancellationToken.None);
+
+        Assert.True(result.IsFail);
+        var error = result.Match(
+            Succ: _ => throw new InvalidOperationException("Expected SSH execution to fail for an empty vault secret."),
+            Fail: failure => failure.Message);
+        Assert.Contains("resolved to an empty secret", error, StringComparison.Ordinal);
     }
 
 }

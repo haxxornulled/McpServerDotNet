@@ -3,7 +3,7 @@
   "entries": {
     "dev": {
       "name": "dev",
-      "description": "Standard SSH credential for the dev profile",
+      "description": "Standard dev credential",
       "secret": {
         "algorithm": "argon2id-aesgcm-v1",
         "salt": "REPLACE_ME",
@@ -14,12 +14,12 @@
         "memorySizeKiB": 65536,
         "degreeOfParallelism": 1
       },
-      "createdUtc": "2026-05-19T00:00:00+00:00",
-      "updatedUtc": "2026-05-19T00:00:00+00:00"
+      "createdUtc": "2026-05-19T00:00:00Z",
+      "updatedUtc": "2026-05-19T00:00:00Z"
     },
     "dev-admin": {
       "name": "dev-admin",
-      "description": "Privileged SSH credential for the dev-admin profile",
+      "description": "Privileged SSH credential",
       "secret": {
         "algorithm": "argon2id-aesgcm-v1",
         "salt": "REPLACE_ME",
@@ -30,8 +30,8 @@
         "memorySizeKiB": 65536,
         "degreeOfParallelism": 1
       },
-      "createdUtc": "2026-05-19T00:00:00+00:00",
-      "updatedUtc": "2026-05-19T00:00:00+00:00"
+      "createdUtc": "2026-05-19T00:00:00Z",
+      "updatedUtc": "2026-05-19T00:00:00Z"
     }
   }
 }

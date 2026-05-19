@@ -34,13 +34,63 @@
     <ProjectReference Include="..\McpServer.Application\McpServer.Application.csproj" />
     <ProjectReference Include="..\McpServer.Infrastructure\McpServer.Infrastructure.csproj" />
   </ItemGroup>
+  <UsingTask TaskName="StopRunningHostProcessesTask"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <ExecutablePath ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Code Type="Class" Language="cs"><![CDATA[
+        public sealed class StopRunningHostProcessesTask : Microsoft.Build.Utilities.Task
+        {
+            [Microsoft.Build.Framework.Required]
+            public string ExecutablePath { get; set; } = string.Empty;
+
+            public override bool Execute()
+            {
+                var normalizedPath = System.IO.Path.GetFullPath(ExecutablePath);
+
+                foreach (var process in System.Diagnostics.Process.GetProcessesByName("McpServer.Host"))
+                {
+                    try
+                    {
+                        using (process)
+                        {
+                            var candidatePath = process.MainModule?.FileName;
+                            if (string.IsNullOrWhiteSpace(candidatePath))
+                            {
+                                continue;
+                            }
+
+                            if (!string.Equals(System.IO.Path.GetFullPath(candidatePath), normalizedPath, System.StringComparison.OrdinalIgnoreCase))
+                            {
+                                continue;
+                            }
+
+                            process.Kill();
+                            process.WaitForExit(5000);
+                        }
+                    }
+                    catch
+                    {
+                        // Best effort only. Build should continue even if a stale process
+                        // could not be terminated because of platform or permission limits.
+                    }
+                }
+
+                return true;
+            }
+        }
+      ]]></Code>
+    </Task>
+  </UsingTask>
   <Target Name="StopRunningHostProcessesBeforeBuild"
           BeforeTargets="PrepareForBuild"
           Condition="'$(OS)' == 'Windows_NT' and '$(DesignTimeBuild)' != 'true'">
     <PropertyGroup>
       <_HostExecutablePath>$([System.IO.Path]::GetFullPath('$(TargetDir)$(AssemblyName).exe'))</_HostExecutablePath>
-      <_StopRunningHostScript>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\scripts\Stop-RunningMcpServerHost.ps1'))</_StopRunningHostScript>
     </PropertyGroup>
-    <Exec Command="powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(_StopRunningHostScript)&quot; -ExecutablePath &quot;$(_HostExecutablePath)&quot;" />
+    <StopRunningHostProcessesTask ExecutablePath="$(_HostExecutablePath)" />
   </Target>
 </Project>

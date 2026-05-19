@@ -122,8 +122,8 @@ public sealed class SshExecutionPolicyTests
         var result = await policy.EvaluateAsync(new SshExecutionRequest
         {
             Profile = "dev",
-            Command = "sudo",
-            Arguments = ["whoami"],
+            Command = "sudo whoami",
+            Arguments = [],
             WorkingDirectory = "/tmp"
         }, CancellationToken.None);
 
@@ -136,6 +136,28 @@ public sealed class SshExecutionPolicyTests
         });
     }
 
+    [Fact]
+    public async Task EvaluateAsync_AllowsSudo_With_Inline_Arguments_When_Profile_Opts_In()
+    {
+        var policy = CreatePolicy(allowedCommands: ["whoami"], allowSudoCommand: true);
+
+        var result = await policy.EvaluateAsync(new SshExecutionRequest
+        {
+            Profile = "dev",
+            Command = "sudo apt update",
+            Arguments = [],
+            WorkingDirectory = "/tmp"
+        }, CancellationToken.None);
+
+        Assert.True(result.IsSucc);
+        result.IfSucc(decision =>
+        {
+            Assert.True(decision.Allowed);
+            Assert.Equal("sudo", decision.ResolvedCommand);
+            Assert.Equal(["apt", "update"], decision.ResolvedArguments);
+        });
+    }
+
     private static SshExecutionPolicy CreatePolicy(IList<string>? allowedCommands = null, bool allowSudoCommand = false)
     {
         var profiles = new Dictionary<string, SshProfileDefinition>(StringComparer.OrdinalIgnoreCase)
@@ -145,7 +167,7 @@ public sealed class SshExecutionPolicyTests
                 Host = "127.0.0.1",
                 Port = 22,
                 Username = "tester",
-                PasswordEnvironmentVariable = "MCP_TEST_SSH_PASSWORD",
+                PasswordVaultItemName = "dev",
                 WorkingDirectory = "/tmp",
                 AllowedCommands = allowedCommands ?? new List<string> { "pwd", "whoami" },
                 DeniedCommands = ["rm"],
@@ -173,6 +195,8 @@ public sealed class SshExecutionPolicyTests
                 LoadUserProfilesFile = false,
                 UserProfilesFilePath = string.Empty,
                 AllowInlineProfiles = false,
+                VaultPath = Path.Combine("workspace", "artifacts", "ssh-vault.json"),
+                VaultKeyPath = Path.Combine("workspace", "artifacts", "ssh-vault.key"),
                 Profiles = new Dictionary<string, SshProfileDefinition>(StringComparer.OrdinalIgnoreCase)
             }),
             new InMemorySshProfileStore(profiles));

@@ -56,6 +56,8 @@ internal static class AgentRouterToolProgram
         {
             return command switch
             {
+                "install-local-clients" => await RunInstallLocalClientsAsync(options, cancellationToken).ConfigureAwait(false),
+                "verify" => await RunVerifyAsync(options, cancellationToken).ConfigureAwait(false),
                 "stress" => await RunStressAsync(options, cancellationToken).ConfigureAwait(false),
                 "smoke" => await RunSmokeAsync(options, cancellationToken).ConfigureAwait(false),
                 "provider-unavailable" => await RunProviderUnavailableAsync(options, cancellationToken).ConfigureAwait(false),
@@ -76,6 +78,20 @@ internal static class AgentRouterToolProgram
         var runner = new StressRunner(httpClient, settings, new ConsoleStressReporter());
         var result = await runner.RunAsync(cancellationToken).ConfigureAwait(false);
         return result.TotalFailures == 0 ? 0 : 1;
+    }
+
+    private static async Task<int> RunVerifyAsync(CommandLineOptions options, CancellationToken cancellationToken)
+    {
+        var settings = RepositoryVerificationSettings.FromOptions(options);
+        var runner = new RepositoryVerificationRunner(settings);
+        return await runner.RunAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<int> RunInstallLocalClientsAsync(CommandLineOptions options, CancellationToken cancellationToken)
+    {
+        var settings = LocalMcpClientConfigSettings.FromOptions(options);
+        var runner = new LocalMcpClientConfigRunner(settings);
+        return await runner.RunAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<int> RunSmokeAsync(CommandLineOptions options, CancellationToken cancellationToken)

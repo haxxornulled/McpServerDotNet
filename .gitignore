@@ -16,8 +16,9 @@ tmp-inference-smoke-console.txt
 .mcp.json
 test.tmp
 /*.zip
-# Local AgentRouter operator profiles. Do not commit machine/host inventory.
-config/agentrouter/*.local.json
+# Local shared-host SSH profiles and vault. Do not commit machine-specific secrets.
+config/mcpserver/*.local.json
+config/mcpserver/*.lock
 workspace/
 src/McpServer.AgentRouter.Host/workspace/
 src/*/logs/

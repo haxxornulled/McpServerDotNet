@@ -242,9 +242,9 @@ public sealed class SshExecutionPolicyDecision
     public int MaxOutputChars { get; set; }
 
     /// <summary>
-    /// Gets or sets the password environment variable name.
+    /// Gets or sets the SSH password vault item name.
     /// </summary>
-    public string? PasswordEnvironmentVariable { get; set; }
+    public string? PasswordVaultItemName { get; set; }
 
     /// <summary>
     /// Gets or sets the private key path.
@@ -252,9 +252,9 @@ public sealed class SshExecutionPolicyDecision
     public string? PrivateKeyPath { get; set; }
 
     /// <summary>
-    /// Gets or sets the private key passphrase environment variable name.
+    /// Gets or sets the private key passphrase vault item name.
     /// </summary>
-    public string? PrivateKeyPassphraseEnvironmentVariable { get; set; }
+    public string? PrivateKeyPassphraseVaultItemName { get; set; }
 
     /// <summary>
     /// Gets or sets the expected host key hash.
@@ -318,9 +318,9 @@ public sealed class SshExecutionCommand
     public int MaxOutputChars { get; set; }
 
     /// <summary>
-    /// Gets or sets the password environment variable name.
+    /// Gets or sets the SSH password vault item name.
     /// </summary>
-    public string? PasswordEnvironmentVariable { get; set; }
+    public string? PasswordVaultItemName { get; set; }
 
     /// <summary>
     /// Gets or sets the private key path.
@@ -328,9 +328,9 @@ public sealed class SshExecutionCommand
     public string? PrivateKeyPath { get; set; }
 
     /// <summary>
-    /// Gets or sets the private key passphrase environment variable name.
+    /// Gets or sets the private key passphrase vault item name.
     /// </summary>
-    public string? PrivateKeyPassphraseEnvironmentVariable { get; set; }
+    public string? PrivateKeyPassphraseVaultItemName { get; set; }
 
     /// <summary>
     /// Gets or sets the expected host key hash.

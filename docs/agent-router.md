@@ -128,14 +128,14 @@ Default rules:
 - explicit allowlist is enabled
 - denied commands are blocked
 - working directory must stay under `AgentRouter:ShellExecution:WorkingDirectoryRoot`
-- inline shell switches such as `pwsh -Command` and `bash -c` are denied by default
+- inline shell switches such as `cmd /c` and `bash -lc` are denied by default
 - output and timeout are bounded
 
 Default allowed commands:
 
 - `dotnet`
 - `git`
-- `pwsh`
+- `dir`
 - `bash`
 
 ## SSH execution
@@ -146,7 +146,7 @@ Default rules:
 
 - requests reference a profile name instead of raw host credentials
 - repo-local and user-local profile files are layered
-- environment variables hold passwords or passphrases
+- vault items hold passwords and passphrases
 - unknown host keys are blocked by default
 - inline shell switches are denied by default
 - output and timeout are bounded
@@ -154,14 +154,24 @@ Default rules:
 
 Profile loading order:
 
-1. `config/agentrouter/ssh-profiles.local.json`
-2. `%LOCALAPPDATA%/McpServer/AgentRouter/ssh-profiles.json`
+1. `config/mcpserver/ssh-profiles.local.json`
+2. `%LOCALAPPDATA%/McpServer/ssh-profiles.json`
 
-The repo ignores `config/agentrouter/*.local.json`. Keep templates or examples checked in, not real secrets.
+The repo ignores `config/mcpserver/*.local.json`. Keep templates or examples checked in, not real secrets.
 
-For CLI smoke coverage, `scripts/Start-AgentRouterStack.ps1 -RunSmoke -EnableSshSmoke` will pass SSH smoke options through to the typed harness.
+## CLI quick reference
 
-- For a real host, set the password environment variable referenced by the repo-local SSH profile in the shell before launching the stack.
+| Command | Purpose | When to use |
+| --- | --- | --- |
+| `dotnet run --project .\tools\McpServer.AgentRouter.Tools -- verify` | Restore, build, and test the repo in the supported C# CLI path. | Use for the default repo validation pass. |
+| `dotnet run --project .\tools\McpServer.AgentRouter.Tools -- smoke` | Run the higher-fidelity AgentRouter runtime harness. | Use when you want end-to-end runtime validation beyond build/test. |
+| `dotnet run --project .\tools\McpServer.AgentRouter.Tools -- stress` | Run the AgentRouter stress harness. | Use for repeatable workload and response-shape checks. |
+| `dotnet run --project .\tools\McpServer.AgentRouter.Tools -- provider-unavailable` | Probe the provider-failure path. | Use when validating fallback and error handling. |
+| `cmd.exe /c "set MCPSERVER_INTEGRATION_LIVE_SSH=1&& dotnet test .\tests\McpServer.IntegrationTests\McpServer.IntegrationTests.csproj -c Release --no-build --filter FullyQualifiedName~Ssh -v minimal"` | Run the live SSH integration slice against the repo-local profile and vault. | Use when you need to prove real host login and command parsing. |
+
+`verify` streams child `dotnet` output into your terminal. When SSH execution is enabled, `smoke` also echoes SSH stdout/stderr blocks back to the terminal for each request.
+
+- For a real host, add the credential to the vault and point the repo-local SSH profile at `passwordVaultItemName`.
 - For admin workflows, create a separate SSH profile with `AllowSudoCommand=true` instead of broadening the default profile.
 
 ## Autonomous loop
@@ -193,91 +203,42 @@ The loop stays bounded by:
 
 ## Local run and validation
 
-Preferred local stack start:
+Stack start:
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Start-AgentRouterStack.ps1
+```text
+dotnet run --project .\src\McpServer.AgentRouter.Host\McpServer.AgentRouter.Host.csproj -c Release
 ```
 
-Pass `-RunSmoke` to that script when you want the typed .NET smoke harness to run the full default MCP tool suite against the freshly started AgentRouter stack.
-
-Smoke test:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-AgentRouter.ps1
-```
-
-Stress test:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Stress-AgentRouter.ps1
-```
-
-Typed harness:
-
-```powershell
-dotnet run --project .\tools\McpServer.AgentRouter.Tools -- smoke
-dotnet run --project .\tools\McpServer.AgentRouter.Tools -- stress
-dotnet run --project .\tools\McpServer.AgentRouter.Tools -- provider-unavailable
-```
-
-The `smoke` command includes the full default MCP tool coverage suite plus loopback web scrape coverage.
+Use the commands in the quick reference above for repo validation, smoke, stress, and live SSH checks. The `smoke` command includes the full default MCP tool coverage suite plus loopback web scrape coverage.
 
 ## Manual examples
 
 Health:
 
-```powershell
-Invoke-RestMethod http://127.0.0.1:5177/health
+```text
+curl.exe http://127.0.0.1:5177/health
 ```
 
 Chat:
 
-```powershell
-$body = @{
-  model = "fast-local"
-  messages = @(
-    @{ role = "user"; content = "Say router online in one sentence." }
-  )
-  stream = $false
-} | ConvertTo-Json -Depth 10
-
-Invoke-RestMethod `
-  -Uri "http://127.0.0.1:5177/v1/chat/completions" `
-  -Method Post `
-  -ContentType "application/json" `
-  -Body $body
+```text
+curl.exe -s http://127.0.0.1:5177/v1/chat/completions ^
+  -H "Content-Type: application/json" ^
+  -d "{\"model\":\"fast-local\",\"messages\":[{\"role\":\"user\",\"content\":\"Say router online in one sentence.\"}],\"stream\":false}"
 ```
 
 MCP tool call:
 
-```powershell
-$body = @{
-  toolName = "fs.list_directory"
-  arguments = @{
-    path = "."
-  }
-} | ConvertTo-Json -Depth 10
-
-Invoke-RestMethod `
-  -Uri "http://127.0.0.1:5177/agent/mcp/tools/call" `
-  -Method Post `
-  -ContentType "application/json" `
-  -Body $body
+```text
+curl.exe -s http://127.0.0.1:5177/agent/mcp/tools/call ^
+  -H "Content-Type: application/json" ^
+  -d "{\"toolName\":\"fs.list_directory\",\"arguments\":{\"path\":\".\"}}"
 ```
 
 Shell execution:
 
-```powershell
-$body = @{
-  command = "dotnet"
-  arguments = @("--info")
-  working_directory = "."
-} | ConvertTo-Json -Depth 10
-
-Invoke-RestMethod `
-  -Uri "http://127.0.0.1:5177/agent/shell/exec" `
-  -Method Post `
-  -ContentType "application/json" `
-  -Body $body
+```text
+curl.exe -s http://127.0.0.1:5177/agent/shell/exec ^
+  -H "Content-Type: application/json" ^
+  -d "{\"command\":\"dotnet\",\"arguments\":[\"--info\"],\"working_directory\":\".\"}"
 ```

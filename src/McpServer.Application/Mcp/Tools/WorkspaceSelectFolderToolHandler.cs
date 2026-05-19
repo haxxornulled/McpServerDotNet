@@ -4,17 +4,16 @@ using McpServer.Application.Abstractions.Files;
 using McpServer.Application.Files.Commands;
 using McpServer.Application.Mcp.Tools;
 using McpServer.Application.Mcp.Validation;
+using McpServer.Domain.Workspace;
 using Microsoft.Extensions.Logging;
 
 namespace McpServer.Application.Mcp.Tools;
 
 public sealed class WorkspaceSelectFolderToolHandler(
     IFileSystemService fileSystemService,
+    McpServer.Domain.Workspace.IWorkspaceMutationService workspaceMutationService,
     IPathPolicy pathPolicy,
-    IResourcePathTranslator resourcePathTranslator,
-    ILogger<WorkspaceSelectFolderToolHandler> logger,
-    IWorkspaceChangeFeed? changeFeed = null,
-    IWorkspaceFileWatcher? workspaceFileWatcher = null) : IToolHandler<WorkspaceSelectFolderRequest>
+    ILogger<WorkspaceSelectFolderToolHandler> logger) : IToolHandler<WorkspaceSelectFolderRequest>
 {
     public string Name => "workspace.select_folder";
     public string Description => "Browses the current project folder and sets the active project folder.";
@@ -61,18 +60,17 @@ public sealed class WorkspaceSelectFolderToolHandler(
                 Succ: path => path,
                 Fail: error => throw new InvalidOperationException(error.Message));
 
-            if (!Directory.Exists(selectedPath))
+            var transition = workspaceMutationService.SetProjectRoot(selectedPath);
+            if (transition.IsFail)
             {
-                return Error.New($"Directory not found: {selectedPath}");
+                return PropagateFailure(transition);
             }
 
-            pathPolicy.SetProjectRoot(selectedPath);
-            resourcePathTranslator.SetProjectRoot(selectedPath);
-            changeFeed?.RecordChange("set_project_root", selectedPath);
-            workspaceFileWatcher?.SetProjectRoot(selectedPath);
             projectRootChanged = !string.Equals(selectedPath, currentProjectRoot, StringComparison.OrdinalIgnoreCase);
             browsePath = selectedPath;
-            currentProjectRoot = selectedPath;
+            currentProjectRoot = transition.Match(
+                Succ: value => value.ProjectRoot,
+                Fail: error => throw new InvalidOperationException(error.Message));
         }
 
         var listing = await fileSystemService
@@ -120,6 +118,11 @@ public sealed class WorkspaceSelectFolderToolHandler(
     }
 
     private static Fin<CallToolResult> PropagateFailure(Fin<string> failure) =>
+        failure.Match<Fin<CallToolResult>>(
+            Succ: _ => throw new InvalidOperationException("Expected failure while propagating result."),
+            Fail: error => error);
+
+    private static Fin<CallToolResult> PropagateFailure(Fin<WorkspaceTransitionResult> failure) =>
         failure.Match<Fin<CallToolResult>>(
             Succ: _ => throw new InvalidOperationException("Expected failure while propagating result."),
             Fail: error => error);

@@ -68,7 +68,7 @@ public sealed class SshExecutionPolicy : ISshExecutionPolicy
 
         if (!catalog.Profiles.TryGetValue(profileName, out var profile))
         {
-            return Succeed(Denied($"Unknown SSH profile '{profileName}'. Configure it in config/agentrouter/ssh-profiles.local.json or the user-level SSH profiles file."));
+            return Succeed(Denied($"Unknown SSH profile '{profileName}'. Configure it in config/mcpserver/ssh-profiles.local.json or the user-level SSH profiles file."));
         }
 
         if (string.IsNullOrWhiteSpace(profile.Host))
@@ -86,11 +86,19 @@ public sealed class SshExecutionPolicy : ISshExecutionPolicy
             return Succeed(Denied("command is required."));
         }
 
-        var command = request.Command.Trim();
+        var parsedCommand = ParseCommand(request.Command);
+        var command = parsedCommand.Command;
         if (ContainsPathSeparator(command))
         {
             return Succeed(Denied("command must be an executable name, not a path."));
         }
+
+        var arguments = parsedCommand.Arguments
+            .Concat(request.Arguments
+                .Where(static argument => argument is not null)
+                .Select(static argument => argument.Trim())
+                .Where(static argument => !string.IsNullOrWhiteSpace(argument)))
+            .ToArray();
 
         var normalizedCommand = NormalizeCommandName(command);
         var sudoAllowed = IsSudoCommand(normalizedCommand) && profile.AllowSudoCommand;
@@ -108,12 +116,6 @@ public sealed class SshExecutionPolicy : ISshExecutionPolicy
         {
             return Succeed(Denied($"Command '{command}' is not allowed for SSH profile '{profileName}'."));
         }
-
-        var arguments = request.Arguments
-            .Where(static argument => argument is not null)
-            .Select(static argument => argument.Trim())
-            .Where(static argument => !string.IsNullOrWhiteSpace(argument))
-            .ToArray();
 
         if (!options.AllowShellInterpreterInlineCommands && IsShellInterpreter(normalizedCommand) && ContainsInlineCommand(arguments))
         {
@@ -148,12 +150,31 @@ public sealed class SshExecutionPolicy : ISshExecutionPolicy
             WorkingDirectory = workingDirectory,
             TimeoutSeconds = timeoutSeconds,
             MaxOutputChars = Math.Max(1, options.MaxOutputChars),
-            PasswordEnvironmentVariable = profile.PasswordEnvironmentVariable,
+            PasswordVaultItemName = profile.PasswordVaultItemName,
             PrivateKeyPath = profile.PrivateKeyPath,
-            PrivateKeyPassphraseEnvironmentVariable = profile.PrivateKeyPassphraseEnvironmentVariable,
+            PrivateKeyPassphraseVaultItemName = profile.PrivateKeyPassphraseVaultItemName,
             HostKeySha256 = profile.HostKeySha256,
             AcceptUnknownHostKey = profile.AcceptUnknownHostKey || options.AllowUnknownHostKeys
         });
+    }
+
+    private static ParsedCommand ParseCommand(string commandText)
+    {
+        var parts = commandText
+            .Trim()
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        if (parts.Length == 0)
+        {
+            return new ParsedCommand(string.Empty, Array.Empty<string>());
+        }
+
+        if (parts.Length == 1)
+        {
+            return new ParsedCommand(parts[0], Array.Empty<string>());
+        }
+
+        return new ParsedCommand(parts[0], parts.Skip(1).ToArray());
     }
 
     private static bool IsAllowedRemoteWorkingDirectory(
@@ -226,8 +247,6 @@ public sealed class SshExecutionPolicy : ISshExecutionPolicy
     {
         return normalizedCommand.Equals("bash", StringComparison.OrdinalIgnoreCase) ||
                normalizedCommand.Equals("sh", StringComparison.OrdinalIgnoreCase) ||
-               normalizedCommand.Equals("pwsh", StringComparison.OrdinalIgnoreCase) ||
-               normalizedCommand.Equals("powershell", StringComparison.OrdinalIgnoreCase) ||
                normalizedCommand.Equals("cmd", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -253,4 +272,6 @@ public sealed class SshExecutionPolicy : ISshExecutionPolicy
     {
         return Fin<SshExecutionPolicyDecision>.Succ(decision);
     }
+
+    private sealed record ParsedCommand(string Command, IReadOnlyList<string> Arguments);
 }

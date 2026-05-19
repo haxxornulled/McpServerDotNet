@@ -5,9 +5,9 @@ public sealed record ConfiguredSshProfile(
     string Host,
     int Port,
     string Username,
-    string? PasswordEnvironmentVariable,
     string? PrivateKeyPath,
-    string? PrivateKeyPassphraseEnvironmentVariable,
+    string? PasswordVaultItemName,
+    string? PrivateKeyPassphraseVaultItemName,
     string? WorkingDirectory,
     string? HostKeySha256,
     bool AcceptUnknownHostKey,
@@ -16,18 +16,14 @@ public sealed record ConfiguredSshProfile(
     IReadOnlyCollection<string> AllowedRemotePathPrefixes,
     bool AllowSudoCommand = false)
 {
-    public SshCredentialSecret? PasswordSecret { get; init; }
-
-    public string? PasswordVaultItemName { get; init; }
-
     public ConfiguredSshProfile(
         string Name,
         string Host,
         int Port,
         string Username,
-        string? PasswordEnvironmentVariable,
         string? PrivateKeyPath,
-        string? PrivateKeyPassphraseEnvironmentVariable,
+        string? PasswordVaultItemName,
+        string? PrivateKeyPassphraseVaultItemName,
         string? WorkingDirectory,
         string? HostKeySha256,
         bool AcceptUnknownHostKey)
@@ -36,9 +32,9 @@ public sealed record ConfiguredSshProfile(
             Host: Host,
             Port: Port,
             Username: Username,
-            PasswordEnvironmentVariable: PasswordEnvironmentVariable,
             PrivateKeyPath: PrivateKeyPath,
-            PrivateKeyPassphraseEnvironmentVariable: PrivateKeyPassphraseEnvironmentVariable,
+            PasswordVaultItemName: PasswordVaultItemName,
+            PrivateKeyPassphraseVaultItemName: PrivateKeyPassphraseVaultItemName,
             WorkingDirectory: WorkingDirectory,
             HostKeySha256: HostKeySha256,
             AcceptUnknownHostKey: AcceptUnknownHostKey,

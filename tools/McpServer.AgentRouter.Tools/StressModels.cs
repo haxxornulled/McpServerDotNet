@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -237,6 +238,8 @@ internal static class CsvWriter
 
 internal sealed class ConsoleStressReporter
 {
+    private readonly object _consoleLock = new();
+
     public void WriteHeader(string stressRunId, StressSettings settings, string reportDirectory)
     {
         ConsoleWriter.WriteSection("AgentRouter stress harness");
@@ -368,6 +371,29 @@ internal sealed class ConsoleStressReporter
         Console.WriteLine($"  {Path.Combine(runResult.ReportDirectory, "results.csv")}");
     }
 
+    public void WriteSshExecutionResponse(JsonNode? json)
+    {
+        if (json is null)
+        {
+            return;
+        }
+
+        var profile = JsonFieldReader.GetString(json, "profile") ?? string.Empty;
+        var host = JsonFieldReader.GetString(json, "host") ?? string.Empty;
+        var traceId = JsonFieldReader.GetString(json, "trace_id") ?? string.Empty;
+        var exitCode = JsonFieldReader.GetInt32(json, "exit_code");
+        var timedOut = JsonFieldReader.GetBoolean(json, "timed_out") ?? false;
+
+        lock (_consoleLock)
+        {
+            ConsoleWriter.WriteSection($"SSH response {profile}@{host}");
+            Console.WriteLine($"TraceId:            {traceId}");
+            Console.WriteLine($"ExitCode:           {exitCode?.ToString(CultureInfo.InvariantCulture) ?? "n/a"}");
+            Console.WriteLine($"TimedOut:           {timedOut.ToString(CultureInfo.InvariantCulture)}");
+            WriteJsonBlock("Response JSON", json);
+        }
+    }
+
     public void WriteFinalResult(int totalFailures)
     {
         ConsoleWriter.WriteSection("Stress result");
@@ -378,5 +404,25 @@ internal sealed class ConsoleStressReporter
         }
 
         ConsoleWriter.WriteError($"Stress run completed with {totalFailures.ToString(CultureInfo.InvariantCulture)} request failures.");
+    }
+
+    private static void WriteJsonBlock(string label, JsonNode? json)
+    {
+        Console.WriteLine($"{label}:");
+        if (json is null)
+        {
+            Console.WriteLine("  <empty>");
+            return;
+        }
+
+        var formatted = json.ToJsonString(new JsonSerializerOptions
+        {
+            WriteIndented = true
+        });
+
+        foreach (var line in formatted.Split('\n'))
+        {
+            Console.WriteLine($"  {line.TrimEnd('\r')}");
+        }
     }
 }

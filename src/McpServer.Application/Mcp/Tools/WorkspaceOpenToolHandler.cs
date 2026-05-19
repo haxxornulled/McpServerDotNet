@@ -5,16 +5,15 @@ using McpServer.Application.Abstractions.Files;
 using McpServer.Application.Abstractions.Mcp;
 using McpServer.Application.Mcp.Validation;
 using McpServer.Application.Mcp.Tools;
+using McpServer.Domain.Workspace;
 using Microsoft.Extensions.Logging;
 
 namespace McpServer.Application.Mcp.Tools;
 
 public sealed class WorkspaceOpenToolHandler(
-    IPathPolicy pathPolicy,
-    IResourcePathTranslator resourcePathTranslator,
+    McpServer.Domain.Workspace.IWorkspaceMutationService workspaceMutationService,
     ILogger<WorkspaceOpenToolHandler> logger,
-    IWorkspaceChangeFeed? changeFeed = null,
-    IWorkspaceFileWatcher? workspaceFileWatcher = null) : IToolHandler<WorkspaceOpenRequest>
+    IPathPolicy pathPolicy) : IToolHandler<WorkspaceOpenRequest>
 {
     public string Name => "workspace.open";
     public string Description => "Opens an existing folder as the active workspace root, similar to VS Code Open Folder. The folder must be inside configured allowed roots and project root is reset to the workspace root.";
@@ -53,30 +52,23 @@ public sealed class WorkspaceOpenToolHandler(
         }
 
         var workspaceRoot = normalized.Match(Succ: value => value, Fail: error => throw new InvalidOperationException(error.Message));
-        if (!Directory.Exists(workspaceRoot))
+        var transition = workspaceMutationService.OpenWorkspace(workspaceRoot);
+        if (transition.IsFail)
         {
-            return ValueTask.FromResult<Fin<CallToolResult>>(Error.New($"Directory not found: {workspaceRoot}"));
+            return ValueTask.FromResult(PropagateFailure<CallToolResult>(transition));
         }
 
-        var previous = pathPolicy.WorkspaceRoot;
-        var changed = !string.Equals(previous, workspaceRoot, StringComparison.OrdinalIgnoreCase);
-
-        try
-        {
-            pathPolicy.SetWorkspaceRoot(workspaceRoot);
-            resourcePathTranslator.SetWorkspaceRoot(workspaceRoot);
-            changeFeed?.RecordChange("open_workspace", workspaceRoot);
-            workspaceFileWatcher?.SetProjectRoot(workspaceRoot);
-        }
-        catch (Exception ex)
-        {
-            return ValueTask.FromResult<Fin<CallToolResult>>(Error.New(ex.Message));
-        }
-
-        var payload = new WorkspaceOpenResult(workspaceRoot, workspaceRoot, changed, pathPolicy.AllowedRoots);
+        var payload = transition.Match(
+            Succ: value => new WorkspaceOpenResult(value.WorkspaceRoot, value.ProjectRoot, value.Changed, pathPolicy.AllowedRoots),
+            Fail: error => throw new InvalidOperationException(error.Message));
         var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true });
         logger.LogInformation("Tool {ToolName} opened workspace {WorkspaceRoot}", Name, workspaceRoot);
 
         return ValueTask.FromResult<Fin<CallToolResult>>(new CallToolResult([new ContentItem("text", json)], StructuredContent: payload));
     }
+
+    private static Fin<T> PropagateFailure<T>(Fin<WorkspaceTransitionResult> failure) =>
+        failure.Match<Fin<T>>(
+            Succ: _ => throw new InvalidOperationException("Expected failure while propagating result."),
+            Fail: error => error);
 }

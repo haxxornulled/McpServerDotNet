@@ -9,10 +9,10 @@ All notable changes to this project will be documented in this file.
 - Rewrote the top-level README to describe the actual repo shape: the stdio MCP host, the AgentRouter HTTP host, the current tool surfaces, the local harnesses, and the real safety defaults.
 - Rewrote `docs/architecture.md`, `docs/method-summary.md`, and `docs/agent-router.md` so they match the current dual-host architecture instead of older milestone-only or stdio-only descriptions.
 - Aligned the repo docs and AgentRouter smoke script with the current codebase, including the separate AgentRouter domain layer, explicit host-base workspace resolution, and `stream=true` SSE support.
-- Rewrote `scripts/README.md` to document the current supported script inventory, including the AgentRouter stack, smoke, and stress scripts.
+- Reworked the repo harness docs to document the current supported C# tool inventory, including the AgentRouter verify, smoke, and stress commands.
 - Rewrote `docs/codex-vscode-mcp-setup.md` and `docs/ollama-local-inference-tools.md` to stop claiming machine-local config files are checked into the repo and to align the setup guidance with the current config-generation flow.
 - Added `web.scrape_url`, loopback web smoke coverage, explicit sudo opt-in for SSH profiles, and explicit workspace-root guidance for Visual Studio and VS Code.
-- Removed the stale root-level `README-AgentRouterStackScripts.md` in favor of the consolidated `docs/agent-router.md` and `scripts/README.md`.
+- Removed the stale root-level `README-AgentRouterStackScripts.md` in favor of the consolidated `docs/agent-router.md` and the typed C# harness documentation.
 - Cleaned repo-local temporary runtime clutter and ignored artifact leftovers from the working tree.
 
 ### Validation
@@ -41,8 +41,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Added `scripts/Invoke-InferenceToolSmokeTest.ps1` to validate registered MCP tools through an OpenAI-compatible inference endpoint such as LM Studio.
-- Added ordered default inference scenarios in `scripts/inference-tool-scenarios.json` for the core filesystem and `shell.exec` tool set.
+- Added the typed inference smoke coverage path in `tools/McpServer.AgentRouter.Tools` to validate registered MCP tools through an OpenAI-compatible inference endpoint.
+- Added ordered default inference scenarios for the core filesystem and `shell.exec` tool set.
 
 ### Changed
 
@@ -54,7 +54,7 @@ All notable changes to this project will be documented in this file.
 - `dotnet build .\McpServer.slnx -c Release --no-restore -v minimal`
 - `dotnet test .\tests\McpServer.UnitTests\McpServer.UnitTests.csproj -c Release --no-build -v minimal`
 - `dotnet test .\tests\McpServer.IntegrationTests\McpServer.IntegrationTests.csproj -c Release --no-build -v minimal`
-- `pwsh -File .\scripts\Invoke-InferenceToolSmokeTest.ps1 -Model google/gemma-4-26b-a4b -InferenceTimeoutSeconds 180 -ResultPath .\inference-smoke-results.json`
+- `dotnet run --project .\tools\McpServer.AgentRouter.Tools -- smoke`
 
 ## 0.1.4 - 2026-04-16
 
@@ -148,7 +148,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - Corrected shared MSBuild configuration so the solution loads, restores, and builds correctly under the installed .NET 10 SDK.
-- Fixed multiple protocol, application, infrastructure, host, and test compilation issues across the initial scaffold.
+- Fixed multiple protocol, application, infrastructure, host, and test compilation issues across the initial project state.
 - Replaced `FluentAssertions` with xUnit assertions to keep the test stack fully open source.
 
 ### Validation

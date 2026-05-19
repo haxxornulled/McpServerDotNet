@@ -1,6 +1,6 @@
 # Codex / VS Code MCP setup
 
-Use the repo script to generate local client config for the current checkout. Do not check the generated files into source control.
+Use the typed C# installer to generate local client config for the current checkout. Do not check the generated files into source control.
 
 Generated local files:
 
@@ -12,19 +12,19 @@ Generated local files:
 
 Generate or refresh them from the repo root:
 
-```powershell
-.\scripts\Install-LocalMcpClients.ps1 -Build
+```text
+dotnet run --project .\tools\McpServer.AgentRouter.Tools -- install-local-clients --build
 ```
 
 Or skip the build:
 
-```powershell
-.\scripts\Install-LocalMcpClients.ps1
+```text
+dotnet run --project .\tools\McpServer.AgentRouter.Tools -- install-local-clients
 ```
 
 ## Required local model setup
 
-```powershell
+```text
 ollama pull qwen3-coder:30b
 ollama pull qwen2.5-coder:14b
 ollama pull devstral-small-2
@@ -33,13 +33,13 @@ ollama serve
 
 Verify Ollama:
 
-```powershell
+```text
 curl http://127.0.0.1:11434/api/tags
 ```
 
 ## Build the stdio host
 
-```powershell
+```text
 dotnet build .\McpServer.slnx -c Release -v minimal
 ```
 

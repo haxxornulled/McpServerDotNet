@@ -1,6 +1,7 @@
 using LanguageExt;
 using McpServer.Application.Abstractions.Files;
 using McpServer.Application.Mcp.Tools;
+using McpServer.Application.Files;
 using McpServer.Infrastructure.Files;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
@@ -21,6 +22,7 @@ public sealed class WorkspaceSelectFolderToolHandlerTests
         var selectionPolicy = new PathPolicy([workspace.Root]);
         var resourceTranslator = new ResourcePathTranslator(workspace.Root);
         var changeFeed = new WorkspaceChangeFeed();
+        var workspaceMutationService = new WorkspaceMutationService(selectionPolicy, resourceTranslator, changeFeed);
         var fileSystemService = new FileSystemService(
             new PathPolicy([workspace.Root]),
             Substitute.For<IFileMutationLockProvider>(),
@@ -28,10 +30,9 @@ public sealed class WorkspaceSelectFolderToolHandlerTests
 
         var handler = new WorkspaceSelectFolderToolHandler(
             fileSystemService,
+            workspaceMutationService,
             selectionPolicy,
-            resourceTranslator,
-            Substitute.For<ILogger<WorkspaceSelectFolderToolHandler>>(),
-            changeFeed);
+            Substitute.For<ILogger<WorkspaceSelectFolderToolHandler>>());
 
         var result = await handler.Handle(new WorkspaceSelectFolderRequest("apps"), CancellationToken.None);
 
@@ -78,6 +79,7 @@ public sealed class WorkspaceSelectFolderToolHandlerTests
 
         var selectionPolicy = new PathPolicy([workspace.Root]);
         var resourceTranslator = new ResourcePathTranslator(workspace.Root);
+        var workspaceMutationService = new WorkspaceMutationService(selectionPolicy, resourceTranslator);
         var fileSystemService = new FileSystemService(
             new PathPolicy([workspace.Root]),
             Substitute.For<IFileMutationLockProvider>(),
@@ -85,8 +87,8 @@ public sealed class WorkspaceSelectFolderToolHandlerTests
 
         var handler = new WorkspaceSelectFolderToolHandler(
             fileSystemService,
+            workspaceMutationService,
             selectionPolicy,
-            resourceTranslator,
             Substitute.For<ILogger<WorkspaceSelectFolderToolHandler>>());
 
         var result = await handler.Handle(new WorkspaceSelectFolderRequest(), CancellationToken.None);

@@ -159,7 +159,7 @@ public sealed class ShellExecutionOptions
     {
         "dotnet",
         "git",
-        "pwsh",
+        "dir",
         "bash"
     };
 
@@ -201,14 +201,17 @@ public sealed class SshExecutionOptions
     /// Repo-local operator profile file. This file is intended for local/lab
     /// machine metadata and should normally be ignored by git.
     /// </summary>
-    public string RepoProfilesFilePath { get; set; } = Path.Combine("..", "..", "config", "agentrouter", "ssh-profiles.local.json");
+    public string RepoProfilesFilePath { get; set; } = Path.Combine("..", "..", "config", "mcpserver", "ssh-profiles.local.json");
 
     /// <summary>
     /// User-level operator profile file. If empty, the infrastructure profile
-    /// store resolves it to %LOCALAPPDATA%/McpServer/AgentRouter/ssh-profiles.json
+    /// store resolves it to %LOCALAPPDATA%/McpServer/ssh-profiles.json
     /// on Windows, or the platform equivalent local application-data path.
     /// </summary>
-    public string UserProfilesFilePath { get; set; } = string.Empty;
+    public string UserProfilesFilePath { get; set; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "McpServer",
+        "ssh-profiles.json");
 
     public bool LoadRepoProfilesFile { get; set; } = true;
 
@@ -219,6 +222,13 @@ public sealed class SshExecutionOptions
     /// appsettings never becomes the SSH profile database.
     /// </summary>
     public bool AllowInlineProfiles { get; set; }
+
+    public string VaultPath { get; set; } = Path.Combine("..", "..", "config", "mcpserver", "ssh-vault.local.json");
+
+    public string VaultKeyPath { get; set; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "McpServer",
+        "ssh-vault.key");
 
     public IList<string> AllowedCommands { get; set; } = new List<string>
     {
@@ -256,11 +266,11 @@ public sealed class SshProfileOptions
 
     public string Username { get; set; } = string.Empty;
 
-    public string? PasswordEnvironmentVariable { get; set; }
-
     public string? PrivateKeyPath { get; set; }
 
-    public string? PrivateKeyPassphraseEnvironmentVariable { get; set; }
+    public string? PasswordVaultItemName { get; set; }
+
+    public string? PrivateKeyPassphraseVaultItemName { get; set; }
 
     public string? WorkingDirectory { get; set; }
 

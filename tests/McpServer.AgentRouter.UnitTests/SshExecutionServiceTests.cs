@@ -27,7 +27,7 @@ public sealed class SshExecutionServiceTests
                 WorkingDirectory = "/tmp",
                 TimeoutSeconds = 60,
                 MaxOutputChars = 200000,
-                PasswordEnvironmentVariable = "MCP_TEST_SSH_PASSWORD",
+                PasswordVaultItemName = "dev",
                 AcceptUnknownHostKey = true
             })));
 
@@ -136,7 +136,7 @@ public sealed class SshExecutionServiceTests
                 WorkingDirectory = "/tmp",
                 TimeoutSeconds = 60,
                 MaxOutputChars = 200000,
-                PasswordEnvironmentVariable = "MCP_TEST_SSH_PASSWORD",
+                PasswordVaultItemName = "dev",
                 AcceptUnknownHostKey = true
             })));
 

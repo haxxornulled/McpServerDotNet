@@ -1,4 +1,5 @@
 using McpServer.Application.Mcp.Tools;
+using McpServer.Application.Files;
 using McpServer.Infrastructure.Files;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
@@ -18,12 +19,12 @@ public sealed class WorkspaceSetRootToolHandlerTests
         var pathPolicy = new PathPolicy([originalWorkspace.Root]);
         var resourceTranslator = new ResourcePathTranslator(originalWorkspace.Root);
         var changeFeed = new WorkspaceChangeFeed();
+        var workspaceMutationService = new WorkspaceMutationService(pathPolicy, resourceTranslator, changeFeed);
 
         var handler = new WorkspaceSetRootToolHandler(
-            pathPolicy,
-            resourceTranslator,
+            workspaceMutationService,
             Substitute.For<ILogger<WorkspaceSetRootToolHandler>>(),
-            changeFeed);
+            pathPolicy);
 
         var result = await handler.Handle(new WorkspaceSetRootRequest(newWorkspaceRoot), CancellationToken.None);
 
@@ -60,11 +61,14 @@ public sealed class WorkspaceSetRootToolHandlerTests
     {
         using var workspace = new TempWorkspace("mcpserver-workspace-set-root-original");
         using var outside = new TempWorkspace("mcpserver-workspace-set-root-outside");
+        var pathPolicy = new PathPolicy([workspace.Root]);
 
         var handler = new WorkspaceSetRootToolHandler(
-            new PathPolicy([workspace.Root]),
-            new ResourcePathTranslator(workspace.Root),
-            Substitute.For<ILogger<WorkspaceSetRootToolHandler>>());
+            new WorkspaceMutationService(
+                pathPolicy,
+                new ResourcePathTranslator(workspace.Root)),
+            Substitute.For<ILogger<WorkspaceSetRootToolHandler>>(),
+            pathPolicy);
 
         var result = await handler.Handle(new WorkspaceSetRootRequest(outside.Root), CancellationToken.None);
 
@@ -76,11 +80,14 @@ public sealed class WorkspaceSetRootToolHandlerTests
     {
         using var workspace = new TempWorkspace("mcpserver-workspace-set-root-missing");
         var missing = Path.Combine(workspace.Root, "missing");
+        var pathPolicy = new PathPolicy([workspace.Root]);
 
         var handler = new WorkspaceSetRootToolHandler(
-            new PathPolicy([workspace.Root]),
-            new ResourcePathTranslator(workspace.Root),
-            Substitute.For<ILogger<WorkspaceSetRootToolHandler>>());
+            new WorkspaceMutationService(
+                pathPolicy,
+                new ResourcePathTranslator(workspace.Root)),
+            Substitute.For<ILogger<WorkspaceSetRootToolHandler>>(),
+            pathPolicy);
 
         var result = await handler.Handle(new WorkspaceSetRootRequest(missing), CancellationToken.None);
 

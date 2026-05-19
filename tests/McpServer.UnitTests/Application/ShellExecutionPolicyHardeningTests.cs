@@ -11,7 +11,7 @@ public sealed class ShellExecutionPolicyHardeningTests
     {
         var sut = new ShellExecutionPolicy(ShellExecutionPolicyOptions.BuildAndTestOnly);
 
-        var result = sut.Validate(new ShellExecRequest("dotnet", ["--info"]), false, false);
+        var result = sut.Validate(new ShellExecRequest("dotnet", ["--info"]), false);
 
         Assert.True(result.IsSucc, GetError(result));
     }
@@ -21,17 +21,17 @@ public sealed class ShellExecutionPolicyHardeningTests
     {
         var sut = new ShellExecutionPolicy(ShellExecutionPolicyOptions.BuildAndTestOnly);
 
-        var result = sut.Validate(new ShellExecRequest("git", ["status", "--short"]), false, false);
+        var result = sut.Validate(new ShellExecRequest("git", ["status", "--short"]), false);
 
         Assert.True(result.IsSucc, GetError(result));
     }
 
     [Fact]
-    public void BuildAndTestOnly_Should_Deny_Pwsh_Even_With_Normal_Timeouts()
+    public void BuildAndTestOnly_Should_Deny_Bash_Even_With_Normal_Timeouts()
     {
         var sut = new ShellExecutionPolicy(ShellExecutionPolicyOptions.BuildAndTestOnly);
 
-        var result = sut.Validate(new ShellExecRequest("pwsh", ["-NoProfile"]), false, false);
+        var result = sut.Validate(new ShellExecRequest("bash", ["-lc", "echo unsafe"]), false);
 
         Assert.True(result.IsFail);
         Assert.Contains("denied", GetError(result), StringComparison.OrdinalIgnoreCase);
@@ -42,13 +42,12 @@ public sealed class ShellExecutionPolicyHardeningTests
     {
         var sut = new ShellExecutionPolicy(new ShellExecutionPolicyOptions(
             AllowShellFallback: false,
-            AllowWindowsCompatibilityShell: false,
             AllowedCommands: ["cmd"],
             DeniedCommands: ["cmd"],
             MaxTimeoutSeconds: 120,
             MaxOutputChars: 12000));
 
-        var result = sut.Validate(new ShellExecRequest("cmd.exe", ["/c", "dir"]), false, false);
+        var result = sut.Validate(new ShellExecRequest("cmd.exe", ["/c", "dir"]), false);
 
         Assert.True(result.IsFail);
         Assert.Contains("denied", GetError(result), StringComparison.OrdinalIgnoreCase);
@@ -59,13 +58,12 @@ public sealed class ShellExecutionPolicyHardeningTests
     {
         var sut = new ShellExecutionPolicy(new ShellExecutionPolicyOptions(
             AllowShellFallback: false,
-            AllowWindowsCompatibilityShell: false,
             AllowedCommands: ["dotnet"],
             DeniedCommands: [],
             MaxTimeoutSeconds: 120,
             MaxOutputChars: 12000));
 
-        var result = sut.Validate(new ShellExecRequest("\"C:\\Program Files\\dotnet\\dotnet.exe\"", ["--version"]), false, false);
+        var result = sut.Validate(new ShellExecRequest("\"C:\\Program Files\\dotnet\\dotnet.exe\"", ["--version"]), false);
 
         Assert.True(result.IsSucc, GetError(result));
     }
@@ -75,13 +73,12 @@ public sealed class ShellExecutionPolicyHardeningTests
     {
         var sut = new ShellExecutionPolicy(new ShellExecutionPolicyOptions(
             AllowShellFallback: false,
-            AllowWindowsCompatibilityShell: false,
             AllowedCommands: ["dotnet"],
             DeniedCommands: [],
             MaxTimeoutSeconds: 120,
             MaxOutputChars: 12000));
 
-        var result = sut.Validate(new ShellExecRequest("git", ["status"]), false, false);
+        var result = sut.Validate(new ShellExecRequest("git", ["status"]), false);
 
         Assert.True(result.IsFail);
         Assert.Contains("allowlist", GetError(result), StringComparison.OrdinalIgnoreCase);
@@ -92,47 +89,28 @@ public sealed class ShellExecutionPolicyHardeningTests
     {
         var sut = new ShellExecutionPolicy(new ShellExecutionPolicyOptions(
             AllowShellFallback: false,
-            AllowWindowsCompatibilityShell: false,
             AllowedCommands: ["dotnet"],
             DeniedCommands: [],
             MaxTimeoutSeconds: 120,
             MaxOutputChars: 12000));
 
-        var result = sut.Validate(new ShellExecRequest("dotnet", ["--version"]), requiresShellFallback: true, requiresWindowsCompatibilityShell: false);
+        var result = sut.Validate(new ShellExecRequest("dotnet", ["--version"]), true);
 
         Assert.True(result.IsFail);
         Assert.Contains("shell command lines are disabled", GetError(result), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void Validate_Should_Deny_Windows_Compatibility_Shell_When_Disabled()
+    public void Validate_Should_Allow_Bare_Shell_Fallback_When_Enabled()
     {
         var sut = new ShellExecutionPolicy(new ShellExecutionPolicyOptions(
-            AllowShellFallback: false,
-            AllowWindowsCompatibilityShell: false,
-            AllowedCommands: ["dir"],
+            AllowShellFallback: true,
+            AllowedCommands: ["git"],
             DeniedCommands: [],
             MaxTimeoutSeconds: 120,
             MaxOutputChars: 12000));
 
-        var result = sut.Validate(new ShellExecRequest("dir", []), requiresShellFallback: false, requiresWindowsCompatibilityShell: true);
-
-        Assert.True(result.IsFail);
-        Assert.Contains("compatibility shell", GetError(result), StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void Validate_Should_Allow_Windows_Compatibility_Shell_When_Explicitly_Enabled()
-    {
-        var sut = new ShellExecutionPolicy(new ShellExecutionPolicyOptions(
-            AllowShellFallback: false,
-            AllowWindowsCompatibilityShell: true,
-            AllowedCommands: ["dir"],
-            DeniedCommands: [],
-            MaxTimeoutSeconds: 120,
-            MaxOutputChars: 12000));
-
-        var result = sut.Validate(new ShellExecRequest("dir", []), requiresShellFallback: false, requiresWindowsCompatibilityShell: true);
+        var result = sut.Validate(new ShellExecRequest("git status"), true);
 
         Assert.True(result.IsSucc, GetError(result));
     }
@@ -142,13 +120,12 @@ public sealed class ShellExecutionPolicyHardeningTests
     {
         var sut = new ShellExecutionPolicy(new ShellExecutionPolicyOptions(
             AllowShellFallback: false,
-            AllowWindowsCompatibilityShell: false,
             AllowedCommands: ["dotnet"],
             DeniedCommands: [],
             MaxTimeoutSeconds: 10,
             MaxOutputChars: 12000));
 
-        var result = sut.Validate(new ShellExecRequest("dotnet", ["test"], TimeoutSeconds: 11), false, false);
+        var result = sut.Validate(new ShellExecRequest("dotnet", ["test"], TimeoutSeconds: 11), false);
 
         Assert.True(result.IsFail);
         Assert.Contains("timeout", GetError(result), StringComparison.OrdinalIgnoreCase);
@@ -159,13 +136,12 @@ public sealed class ShellExecutionPolicyHardeningTests
     {
         var sut = new ShellExecutionPolicy(new ShellExecutionPolicyOptions(
             AllowShellFallback: false,
-            AllowWindowsCompatibilityShell: false,
             AllowedCommands: ["dotnet"],
             DeniedCommands: [],
             MaxTimeoutSeconds: 120,
             MaxOutputChars: 1000));
 
-        var result = sut.Validate(new ShellExecRequest("dotnet", ["test"], MaxOutputChars: 1001), false, false);
+        var result = sut.Validate(new ShellExecRequest("dotnet", ["test"], MaxOutputChars: 1001), false);
 
         Assert.True(result.IsFail);
         Assert.Contains("Max output chars", GetError(result), StringComparison.Ordinal);
@@ -176,9 +152,8 @@ public sealed class ShellExecutionPolicyHardeningTests
     {
         var options = new ShellExecutionPolicyOptions(
             AllowShellFallback: false,
-            AllowWindowsCompatibilityShell: false,
             AllowedCommands: [" dotnet ", "DOTNET", "git", ""],
-            DeniedCommands: [" pwsh ", "PWSH", ""],
+            DeniedCommands: [" bash ", "BASH", ""],
             MaxTimeoutSeconds: 120,
             MaxOutputChars: 12000);
 
@@ -186,7 +161,7 @@ public sealed class ShellExecutionPolicyHardeningTests
         Assert.Contains("dotnet", options.AllowedCommands);
         Assert.Contains("git", options.AllowedCommands);
         Assert.Single(options.DeniedCommands);
-        Assert.Contains("pwsh", options.DeniedCommands);
+        Assert.Contains("bash", options.DeniedCommands);
     }
 
     private static string GetError(LanguageExt.Fin<LanguageExt.Unit> result)

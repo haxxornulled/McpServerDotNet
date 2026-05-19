@@ -92,9 +92,9 @@ public sealed class SshExecutionService : ISshExecutionService
             WorkingDirectory = policy.WorkingDirectory,
             TimeoutSeconds = policy.TimeoutSeconds,
             MaxOutputChars = policy.MaxOutputChars,
-            PasswordEnvironmentVariable = policy.PasswordEnvironmentVariable,
+            PasswordVaultItemName = policy.PasswordVaultItemName,
             PrivateKeyPath = policy.PrivateKeyPath,
-            PrivateKeyPassphraseEnvironmentVariable = policy.PrivateKeyPassphraseEnvironmentVariable,
+            PrivateKeyPassphraseVaultItemName = policy.PrivateKeyPassphraseVaultItemName,
             HostKeySha256 = policy.HostKeySha256,
             AcceptUnknownHostKey = policy.AcceptUnknownHostKey
         };

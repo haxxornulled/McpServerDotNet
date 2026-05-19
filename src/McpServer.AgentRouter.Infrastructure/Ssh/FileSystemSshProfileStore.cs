@@ -187,7 +187,6 @@ public sealed class FileSystemSshProfileStore : ISshProfileStore
         return Path.GetFullPath(Path.Combine(
             localAppData,
             "McpServer",
-            "AgentRouter",
             "ssh-profiles.json"));
     }
 
@@ -209,9 +208,9 @@ public sealed class FileSystemSshProfileStore : ISshProfileStore
             Host = source.Host,
             Port = source.Port,
             Username = source.Username,
-            PasswordEnvironmentVariable = source.PasswordEnvironmentVariable,
             PrivateKeyPath = source.PrivateKeyPath,
-            PrivateKeyPassphraseEnvironmentVariable = source.PrivateKeyPassphraseEnvironmentVariable,
+            PasswordVaultItemName = source.PasswordVaultItemName,
+            PrivateKeyPassphraseVaultItemName = source.PrivateKeyPassphraseVaultItemName,
             WorkingDirectory = source.WorkingDirectory,
             HostKeySha256 = source.HostKeySha256,
             AcceptUnknownHostKey = source.AcceptUnknownHostKey,

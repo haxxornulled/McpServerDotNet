@@ -30,7 +30,6 @@ public sealed class ShellOptions
 {
     public bool Enabled { get; init; }
     public bool AllowShellFallback { get; init; }
-    public bool AllowWindowsCompatibilityShell { get; init; }
     public string[] AllowedCommands { get; init; } = [];
     public string[] DeniedCommands { get; init; } =
     [
@@ -46,8 +45,6 @@ public sealed class ShellOptions
         "mshta",
         "net",
         "netsh",
-        "powershell",
-        "pwsh",
         "reg",
         "regsvr32",
         "rm",
@@ -107,14 +104,12 @@ public sealed class SshProfileOptions
     public string Host { get; init; } = string.Empty;
     public int Port { get; init; } = 22;
     public string Username { get; init; } = string.Empty;
-    public string? PasswordEnvironmentVariable { get; init; }
     public string? PrivateKeyPath { get; init; }
-    public string? PrivateKeyPassphraseEnvironmentVariable { get; init; }
+    public string? PasswordVaultItemName { get; init; }
+    public string? PrivateKeyPassphraseVaultItemName { get; init; }
     public string? WorkingDirectory { get; init; }
     public string? HostKeySha256 { get; init; }
     public bool AcceptUnknownHostKey { get; init; }
-    public SshCredentialSecret? PasswordSecret { get; init; }
-    public string? PasswordVaultItemName { get; init; }
     public string[] AllowedCommands { get; init; } = [];
     public string[] DeniedCommands { get; init; } =
     [
@@ -122,8 +117,6 @@ public sealed class SshProfileOptions
         "curl",
         "nc",
         "netcat",
-        "powershell",
-        "pwsh",
         "rm",
         "scp",
         "sh",

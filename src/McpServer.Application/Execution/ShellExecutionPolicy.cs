@@ -22,13 +22,9 @@ public sealed class ShellExecutionPolicy : IShellExecutionPolicy
             StringComparer.OrdinalIgnoreCase);
     }
 
-    public Fin<Unit> Validate(ShellExecRequest request, bool requiresShellFallback) =>
-        Validate(request, requiresShellFallback, requiresWindowsCompatibilityShell: false);
-
     public Fin<Unit> Validate(
         ShellExecRequest request,
-        bool requiresShellFallback,
-        bool requiresWindowsCompatibilityShell)
+        bool requiresShellFallback)
     {
         if (string.IsNullOrWhiteSpace(request.Command))
         {
@@ -65,11 +61,6 @@ public sealed class ShellExecutionPolicy : IShellExecutionPolicy
         if (requiresShellFallback && !_options.AllowShellFallback)
         {
             return Error.New("Bare shell command lines are disabled by shell execution policy. Pass an executable plus args, or enable AllowShellFallback explicitly.");
-        }
-
-        if (requiresWindowsCompatibilityShell && !_options.AllowWindowsCompatibilityShell)
-        {
-            return Error.New("Windows compatibility shell wrapping is disabled by shell execution policy. Use native executable+args or explicitly enable AllowWindowsCompatibilityShell.");
         }
 
         return unit;

@@ -51,11 +51,11 @@ public static class AgentRouterEndpointExtensions
             "/v1/chat/completions",
             static async Task<IResult> (
                 OpenAiChatCompletionRequest? request,
-                IOptions<AgentRouterOptions> options,
+                IOptionsMonitor<AgentRouterOptions> options,
                 IModelRouter router,
                 CancellationToken cancellationToken) =>
             {
-                var mapped = MapChatCompletionRequest(request, options.Value);
+                var mapped = MapChatCompletionRequest(request, options.CurrentValue);
                 if (mapped.IsFail)
                 {
                     return ToRequestMappingFailure(mapped);
@@ -293,8 +293,8 @@ public static class AgentRouterEndpointExtensions
         return app.Use(async (context, next) =>
         {
             var options = context.RequestServices
-                .GetRequiredService<IOptions<AgentRouterOptions>>()
-                .Value;
+                .GetRequiredService<IOptionsMonitor<AgentRouterOptions>>()
+                .CurrentValue;
 
             if (!options.RequireApiKey)
             {

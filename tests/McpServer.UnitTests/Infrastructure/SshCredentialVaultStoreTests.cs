@@ -89,4 +89,109 @@ public sealed class SshCredentialVaultStoreTests
         Assert.Equal(0, deleteExit);
         Assert.False(store.ContainsEntry("dev"));
     }
+
+    [Fact]
+    public void Cli_Verify_Confirms_Stored_Secret_Without_Echoing_It()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"mcpserver-ssh-vault-verify-{Guid.NewGuid():N}");
+        var vaultPath = Path.Combine(root, "ssh-vault.json");
+        var vaultKeyPath = Path.Combine(root, "ssh-vault.key");
+
+        var addExit = VaultCli.Run([
+            "add",
+            "dev",
+            "--secret",
+            "super-secret-password",
+            "--vault-path",
+            vaultPath,
+            "--vault-key-path",
+            vaultKeyPath,
+            "--base-directory",
+            root
+        ]);
+
+        Assert.Equal(0, addExit);
+
+        var verifyExit = VaultCli.Run([
+            "verify",
+            "dev",
+            "--expected",
+            "super-secret-password",
+            "--vault-path",
+            vaultPath,
+            "--vault-key-path",
+            vaultKeyPath,
+            "--base-directory",
+            root
+        ]);
+
+        Assert.Equal(0, verifyExit);
+    }
+
+    [Fact]
+    public void Cli_Verify_Fails_When_Expected_Secret_Does_Not_Match()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"mcpserver-ssh-vault-verify-fail-{Guid.NewGuid():N}");
+        var vaultPath = Path.Combine(root, "ssh-vault.json");
+        var vaultKeyPath = Path.Combine(root, "ssh-vault.key");
+
+        var addExit = VaultCli.Run([
+            "add",
+            "dev",
+            "--secret",
+            "super-secret-password",
+            "--vault-path",
+            vaultPath,
+            "--vault-key-path",
+            vaultKeyPath,
+            "--base-directory",
+            root
+        ]);
+
+        Assert.Equal(0, addExit);
+
+        var verifyExit = VaultCli.Run([
+            "verify",
+            "dev",
+            "--expected",
+            "definitely-wrong",
+            "--vault-path",
+            vaultPath,
+            "--vault-key-path",
+            vaultKeyPath,
+            "--base-directory",
+            root
+        ]);
+
+        Assert.Equal(1, verifyExit);
+    }
+
+    [Fact]
+    public void Cli_Add_From_Secret_File_Trims_Trailing_Newlines()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"mcpserver-ssh-vault-cli-file-{Guid.NewGuid():N}");
+        var vaultPath = Path.Combine(root, "ssh-vault.json");
+        var vaultKeyPath = Path.Combine(root, "ssh-vault.key");
+        var secretFile = Path.Combine(root, "secret.txt");
+        Directory.CreateDirectory(root);
+        File.WriteAllText(secretFile, "super-secret-password\r\n");
+
+        var addExit = VaultCli.Run([
+            "add",
+            "dev",
+            "--secret-file",
+            secretFile,
+            "--vault-path",
+            vaultPath,
+            "--vault-key-path",
+            vaultKeyPath,
+            "--base-directory",
+            root
+        ]);
+
+        Assert.Equal(0, addExit);
+
+        var store = new SshCredentialVaultStore(vaultPath, vaultKeyPath, root);
+        Assert.Equal("super-secret-password", store.ResolveSecret("dev"));
+    }
 }

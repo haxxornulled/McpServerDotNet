@@ -16,7 +16,6 @@ public sealed class SshService(
     IEnumerable<ConfiguredSshProfile> profiles,
     string contentRoot,
     ILogger<SshService> logger,
-    SshCredentialVault? credentialVault = null,
     SshCredentialVaultStore? credentialVaultStore = null) : ISshService
 {
     private const int MinimumTimeoutSeconds = 1;
@@ -27,7 +26,6 @@ public sealed class SshService(
     private readonly Dictionary<string, ConfiguredSshProfile> _profiles = profiles
         .Where(static profile => !string.IsNullOrWhiteSpace(profile.Name))
         .ToDictionary(static profile => profile.Name, StringComparer.OrdinalIgnoreCase);
-    private readonly SshCredentialVault? _credentialVault = credentialVault;
     private readonly SshCredentialVaultStore? _credentialVaultStore = credentialVaultStore;
 
     public async ValueTask<Fin<SshCommandResult>> ExecuteAsync(ExecuteSshCommand command, CancellationToken ct)
@@ -56,61 +54,48 @@ public sealed class SshService(
                 ? resolvedProfile.WorkingDirectory ?? string.Empty
                 : command.WorkingDirectory;
 
-            var executionResult = await Task.Run(() =>
+            SshAuthenticationException? authFailure = null;
+            foreach (var attempt in CreateConnectionAttempts(resolvedProfile, timeoutSeconds))
             {
-                using var client = CreateSshClient(resolvedProfile, timeoutSeconds);
-                client.Connect();
-
-                using var sshCommand = client.CreateCommand(BuildRemoteCommand(command.Command, command.Args, workingDirectory));
-                sshCommand.CommandTimeout = TimeSpan.FromSeconds(timeoutSeconds);
-
                 try
                 {
-                    var stdout = sshCommand.Execute();
-                    var stderr = sshCommand.Error;
-                    var outputTruncated = false;
+                    var executionResult = await Task.Run(() =>
+                        ExecuteWithConnectionInfo(
+                            resolvedProfile,
+                            attempt.ConnectionInfo,
+                            command,
+                            workingDirectory,
+                            timeoutSeconds,
+                            maxOutputChars), ct).ConfigureAwait(false);
 
-                    stdout = Truncate(stdout, maxOutputChars, ref outputTruncated);
-                    stderr = Truncate(stderr, maxOutputChars, ref outputTruncated);
+                    logger.LogInformation(
+                        "Executed SSH command via profile {Profile} on {Host}:{Port} with exit code {ExitCode}",
+                        executionResult.Profile,
+                        executionResult.Host,
+                        executionResult.Port,
+                        executionResult.ExitCode);
 
-                    return new SshCommandResult(
-                        resolvedProfile.Name,
-                        resolvedProfile.Host,
-                        resolvedProfile.Port,
-                        resolvedProfile.Username,
-                        command.Command,
-                        string.IsNullOrWhiteSpace(workingDirectory) ? "." : workingDirectory,
-                        sshCommand.ExitStatus ?? -1,
-                        stdout,
-                        stderr,
-                        TimedOut: false,
-                        OutputTruncated: outputTruncated);
+                    return executionResult;
                 }
-                catch (SshOperationTimeoutException ex)
+                catch (SshAuthenticationException ex)
                 {
-                    return new SshCommandResult(
+                    authFailure = ex;
+                    logger.LogWarning(
+                        ex,
+                        "SSH authentication attempt {Attempt} failed for profile {Profile} on {Host}:{Port}",
+                        attempt.Description,
                         resolvedProfile.Name,
                         resolvedProfile.Host,
-                        resolvedProfile.Port,
-                        resolvedProfile.Username,
-                        command.Command,
-                        string.IsNullOrWhiteSpace(workingDirectory) ? "." : workingDirectory,
-                        ExitCode: -1,
-                        StandardOutput: string.Empty,
-                        StandardError: ex.Message,
-                        TimedOut: true,
-                        OutputTruncated: false);
+                        resolvedProfile.Port);
                 }
-            }, ct).ConfigureAwait(false);
+            }
 
-            logger.LogInformation(
-                "Executed SSH command via profile {Profile} on {Host}:{Port} with exit code {ExitCode}",
-                executionResult.Profile,
-                executionResult.Host,
-                executionResult.Port,
-                executionResult.ExitCode);
+            if (authFailure is not null)
+            {
+                return Error.New($"SSH authentication failed for profile '{command.Profile}': {authFailure.Message}");
+            }
 
-            return executionResult;
+            return Error.New($"SSH profile '{command.Profile}' did not provide a usable authentication method.");
         }
         catch (OperationCanceledException)
         {
@@ -137,58 +122,43 @@ public sealed class SshService(
                 Succ: value => value,
                 Fail: _ => throw new InvalidOperationException("Expected SSH profile resolution to succeed."));
 
-            var writeResult = await Task.Run(() =>
+            SshAuthenticationException? authFailure = null;
+            foreach (var attempt in CreateConnectionAttempts(resolvedProfile, timeoutSeconds: 60))
             {
-                using var client = CreateSftpClient(resolvedProfile, timeoutSeconds: 60);
-                client.Connect();
-
-                var remotePath = NormalizeRemotePath(command.Path);
-                if (string.IsNullOrWhiteSpace(remotePath))
+                try
                 {
-                    throw new InvalidOperationException("Remote path is required.");
+                    var writeResult = await Task.Run(() =>
+                        WriteTextWithConnectionInfo(
+                            resolvedProfile,
+                            attempt.ConnectionInfo,
+                            command), ct).ConfigureAwait(false);
+
+                    logger.LogInformation(
+                        "Wrote remote file {Path} via SSH profile {Profile}",
+                        writeResult.Path,
+                        writeResult.Profile);
+
+                    return writeResult;
                 }
-
-                ValidateRemoteWritePath(resolvedProfile, remotePath);
-
-                var remoteDirectory = GetRemoteDirectory(remotePath);
-                if (command.CreateDirectories && !string.IsNullOrWhiteSpace(remoteDirectory))
+                catch (SshAuthenticationException ex)
                 {
-                    EnsureDirectoryExists(client, remoteDirectory);
+                    authFailure = ex;
+                    logger.LogWarning(
+                        ex,
+                        "SSH authentication attempt {Attempt} failed for profile {Profile} on {Host}:{Port}",
+                        attempt.Description,
+                        resolvedProfile.Name,
+                        resolvedProfile.Host,
+                        resolvedProfile.Port);
                 }
+            }
 
-                var existed = client.Exists(remotePath);
-                if (existed && !command.Overwrite)
-                {
-                    throw new InvalidOperationException($"Remote path already exists: {remotePath}");
-                }
+            if (authFailure is not null)
+            {
+                return Error.New($"SSH authentication failed for profile '{command.Profile}': {authFailure.Message}");
+            }
 
-                var encoding = Encoding.GetEncoding(command.Encoding);
-                var bytes = encoding.GetBytes(command.Content);
-                using var ms = new MemoryStream(bytes, writable: false);
-                client.UploadFile(ms, remotePath, canOverride: command.Overwrite);
-
-                if (!string.IsNullOrWhiteSpace(command.Permissions))
-                {
-                    var permissionsApplied = NormalizePermissions(command.Permissions);
-                    client.ChangePermissions(remotePath, Convert.ToInt16(permissionsApplied, 8));
-                }
-
-                return new SshFileWriteResult(
-                    resolvedProfile.Name,
-                    resolvedProfile.Host,
-                    resolvedProfile.Port,
-                    resolvedProfile.Username,
-                    remotePath,
-                    bytes.LongLength,
-                    Success: true);
-            }, ct).ConfigureAwait(false);
-
-            logger.LogInformation(
-                "Wrote remote file {Path} via SSH profile {Profile}",
-                writeResult.Path,
-                writeResult.Profile);
-
-            return writeResult;
+            return Error.New($"SSH profile '{command.Profile}' did not provide a usable authentication method.");
         }
         catch (OperationCanceledException)
         {
@@ -231,60 +201,9 @@ public sealed class SshService(
         return profile;
     }
 
-    private SshClient CreateSshClient(ConfiguredSshProfile profile, int timeoutSeconds)
+    private IReadOnlyList<SshConnectionAttempt> CreateConnectionAttempts(ConfiguredSshProfile profile, int timeoutSeconds)
     {
-        var connectionInfo = CreateConnectionInfo(profile, timeoutSeconds);
-        var client = new SshClient(connectionInfo);
-        ConfigureHostKeyValidation(client, profile);
-        return client;
-    }
-
-    private SftpClient CreateSftpClient(ConfiguredSshProfile profile, int timeoutSeconds)
-    {
-        var connectionInfo = CreateConnectionInfo(profile, timeoutSeconds);
-        var client = new SftpClient(connectionInfo);
-        ConfigureHostKeyValidation(client, profile);
-        return client;
-    }
-
-    private ConnectionInfo CreateConnectionInfo(ConfiguredSshProfile profile, int timeoutSeconds)
-    {
-        List<AuthenticationMethod> authMethods = [];
-
-        if (!string.IsNullOrWhiteSpace(profile.PasswordVaultItemName))
-        {
-            if (_credentialVaultStore is null)
-            {
-                throw new InvalidOperationException(
-                    $"SSH profile '{profile.Name}' uses a vault item reference, but no SSH credential vault store is configured.");
-            }
-
-            var password = _credentialVaultStore.ResolveSecret(profile.PasswordVaultItemName);
-            authMethods.Add(new PasswordAuthenticationMethod(profile.Username, password));
-        }
-        else
-        if (profile.PasswordSecret is not null)
-        {
-            if (_credentialVault is null)
-            {
-                throw new InvalidOperationException(
-                    $"SSH profile '{profile.Name}' uses an encrypted password secret, but no SSH credential vault is configured.");
-            }
-
-            var password = _credentialVault.Unprotect(profile.PasswordSecret);
-            authMethods.Add(new PasswordAuthenticationMethod(profile.Username, password));
-        }
-        else if (!string.IsNullOrWhiteSpace(profile.PasswordEnvironmentVariable))
-        {
-            var password = Environment.GetEnvironmentVariable(profile.PasswordEnvironmentVariable);
-            if (string.IsNullOrWhiteSpace(password))
-            {
-                throw new InvalidOperationException(
-                    $"Environment variable '{profile.PasswordEnvironmentVariable}' for SSH profile '{profile.Name}' is not set.");
-            }
-
-            authMethods.Add(new PasswordAuthenticationMethod(profile.Username, password));
-        }
+        List<SshConnectionAttempt> attempts = [];
 
         if (!string.IsNullOrWhiteSpace(profile.PrivateKeyPath))
         {
@@ -294,27 +213,270 @@ public sealed class SshService(
                 throw new FileNotFoundException($"SSH private key was not found: {privateKeyPath}", privateKeyPath);
             }
 
-            var passphrase = string.IsNullOrWhiteSpace(profile.PrivateKeyPassphraseEnvironmentVariable)
+            var passphrase = string.IsNullOrWhiteSpace(profile.PrivateKeyPassphraseVaultItemName)
                 ? null
-                : Environment.GetEnvironmentVariable(profile.PrivateKeyPassphraseEnvironmentVariable);
-
+                : ResolveRequiredVaultSecret(profile.PrivateKeyPassphraseVaultItemName, "private key passphrase");
             var privateKeyFile = string.IsNullOrWhiteSpace(passphrase)
                 ? new PrivateKeyFile(privateKeyPath)
                 : new PrivateKeyFile(privateKeyPath, passphrase);
 
-            authMethods.Add(new PrivateKeyAuthenticationMethod(profile.Username, privateKeyFile));
+            attempts.Add(new SshConnectionAttempt(
+                CreateConnectionInfo(profile, timeoutSeconds, [new PrivateKeyAuthenticationMethod(profile.Username, privateKeyFile)]),
+                "private-key"));
         }
 
-        if (authMethods.Count is 0)
+        if (!string.IsNullOrWhiteSpace(profile.PasswordVaultItemName))
+        {
+            if (_credentialVaultStore is null)
+            {
+                throw new InvalidOperationException(
+                    $"SSH profile '{profile.Name}' uses a vault item reference, but no SSH credential vault store is configured.");
+            }
+
+            var password = ResolveRequiredVaultSecret(profile.PasswordVaultItemName, "password");
+            attempts.Add(new SshConnectionAttempt(
+                CreateConnectionInfo(profile, timeoutSeconds, [CreateKeyboardInteractiveAuthenticationMethod(profile.Username, password)]),
+                "keyboard-interactive"));
+            attempts.Add(new SshConnectionAttempt(
+                CreateConnectionInfo(profile, timeoutSeconds, [CreatePasswordAuthenticationMethod(profile.Username, password)]),
+                "password"));
+        }
+
+        if (attempts.Count is 0)
         {
             throw new InvalidOperationException(
-                $"SSH profile '{profile.Name}' must define PasswordVaultItemName, PasswordSecret, PasswordEnvironmentVariable, or PrivateKeyPath.");
+                $"SSH profile '{profile.Name}' must define PasswordVaultItemName and/or PrivateKeyPath.");
         }
 
-        return new ConnectionInfo(profile.Host, profile.Port, profile.Username, authMethods.ToArray())
+        return attempts;
+    }
+
+    private static ConnectionInfo CreateConnectionInfo(
+        ConfiguredSshProfile profile,
+        int timeoutSeconds,
+        IEnumerable<AuthenticationMethod> authMethods) =>
+        new(profile.Host, profile.Port, profile.Username, authMethods.ToArray())
         {
             Timeout = TimeSpan.FromSeconds(timeoutSeconds)
         };
+
+    private SshClient CreateSshClient(ConnectionInfo connectionInfo, ConfiguredSshProfile profile)
+    {
+        var client = new SshClient(connectionInfo);
+        ConfigureHostKeyValidation(client, profile);
+        return client;
+    }
+
+    private SftpClient CreateSftpClient(ConnectionInfo connectionInfo, ConfiguredSshProfile profile)
+    {
+        var client = new SftpClient(connectionInfo);
+        ConfigureHostKeyValidation(client, profile);
+        return client;
+    }
+
+    private SshCommandResult ExecuteWithConnectionInfo(
+        ConfiguredSshProfile profile,
+        ConnectionInfo connectionInfo,
+        ExecuteSshCommand command,
+        string workingDirectory,
+        int timeoutSeconds,
+        int maxOutputChars)
+    {
+        using var client = CreateSshClient(connectionInfo, profile, out var hostKeyValidation);
+        client.ConnectionInfo.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+        try
+        {
+            client.Connect();
+        }
+        catch (Exception ex) when (hostKeyValidation.WasRejected && ex is SshException)
+        {
+            throw new SshException(hostKeyValidation.CreateFailureMessage(profile), ex);
+        }
+
+        try
+        {
+            using var sshCommand = client.CreateCommand(BuildRemoteCommand(command.Command, command.Args, workingDirectory));
+            sshCommand.CommandTimeout = TimeSpan.FromSeconds(timeoutSeconds);
+
+            try
+            {
+                var stdout = sshCommand.Execute();
+                var stderr = sshCommand.Error;
+                var outputTruncated = false;
+
+                stdout = Truncate(stdout, maxOutputChars, ref outputTruncated);
+                stderr = Truncate(stderr, maxOutputChars, ref outputTruncated);
+
+                return new SshCommandResult(
+                    profile.Name,
+                    profile.Host,
+                    profile.Port,
+                    profile.Username,
+                    command.Command,
+                    string.IsNullOrWhiteSpace(workingDirectory) ? "." : workingDirectory,
+                    sshCommand.ExitStatus.GetValueOrDefault(-1),
+                    stdout,
+                    stderr,
+                    TimedOut: false,
+                    OutputTruncated: outputTruncated);
+            }
+            catch (SshOperationTimeoutException ex)
+            {
+                return new SshCommandResult(
+                    profile.Name,
+                    profile.Host,
+                    profile.Port,
+                    profile.Username,
+                    command.Command,
+                    string.IsNullOrWhiteSpace(workingDirectory) ? "." : workingDirectory,
+                    ExitCode: -1,
+                    StandardOutput: string.Empty,
+                    StandardError: ex.Message,
+                    TimedOut: true,
+                    OutputTruncated: false);
+            }
+        }
+        finally
+        {
+            if (client.IsConnected)
+            {
+                client.Disconnect();
+            }
+        }
+    }
+
+    private SshFileWriteResult WriteTextWithConnectionInfo(
+        ConfiguredSshProfile profile,
+        ConnectionInfo connectionInfo,
+        WriteSshTextCommand command)
+    {
+        using var client = CreateSftpClient(connectionInfo, profile, out var hostKeyValidation);
+        client.ConnectionInfo.Timeout = TimeSpan.FromSeconds(60);
+        try
+        {
+            client.Connect();
+        }
+        catch (Exception ex) when (hostKeyValidation.WasRejected && ex is SshException)
+        {
+            throw new SshException(hostKeyValidation.CreateFailureMessage(profile), ex);
+        }
+
+        try
+        {
+            var remotePath = NormalizeRemotePath(command.Path);
+            if (string.IsNullOrWhiteSpace(remotePath))
+            {
+                throw new InvalidOperationException("Remote path is required.");
+            }
+
+            ValidateRemoteWritePath(profile, remotePath);
+
+            var remoteDirectory = GetRemoteDirectory(remotePath);
+            if (command.CreateDirectories && !string.IsNullOrWhiteSpace(remoteDirectory))
+            {
+                EnsureDirectoryExists(client, remoteDirectory);
+            }
+
+            var existed = client.Exists(remotePath);
+            if (existed && !command.Overwrite)
+            {
+                throw new InvalidOperationException($"Remote path already exists: {remotePath}");
+            }
+
+            var encoding = Encoding.GetEncoding(command.Encoding);
+            var bytes = encoding.GetBytes(command.Content);
+            using var ms = new MemoryStream(bytes, writable: false);
+            client.UploadFile(ms, remotePath, canOverride: command.Overwrite);
+
+            if (!string.IsNullOrWhiteSpace(command.Permissions))
+            {
+                var permissionsApplied = NormalizePermissions(command.Permissions);
+                client.ChangePermissions(remotePath, Convert.ToInt16(permissionsApplied, 8));
+            }
+
+            return new SshFileWriteResult(
+                profile.Name,
+                profile.Host,
+                profile.Port,
+                profile.Username,
+                remotePath,
+                bytes.LongLength,
+                Success: true);
+        }
+        finally
+        {
+            if (client.IsConnected)
+            {
+                client.Disconnect();
+            }
+        }
+    }
+
+    private sealed record SshConnectionAttempt(
+        ConnectionInfo ConnectionInfo,
+        string Description);
+
+    private string ResolveRequiredVaultSecret(string? itemName, string purpose)
+    {
+        if (string.IsNullOrWhiteSpace(itemName))
+        {
+            throw new InvalidOperationException($"SSH {purpose} vault item name is missing.");
+        }
+
+        if (_credentialVaultStore is null)
+        {
+            throw new InvalidOperationException(
+                $"SSH {purpose} vault item '{itemName}' was requested, but no SSH credential vault store is configured.");
+        }
+
+        var secret = _credentialVaultStore.ResolveSecret(itemName);
+        if (string.IsNullOrEmpty(secret))
+        {
+            throw new InvalidOperationException(
+                $"SSH {purpose} vault item '{itemName}' resolved to an empty secret. Check that the credential source is visible to this process.");
+        }
+
+        return secret;
+    }
+
+    private SshClient CreateSshClient(ConnectionInfo connectionInfo, ConfiguredSshProfile profile, out SshHostKeyValidationState hostKeyValidation)
+    {
+        hostKeyValidation = new SshHostKeyValidationState();
+        var capturedHostKeyValidation = hostKeyValidation;
+        var client = new SshClient(connectionInfo);
+        client.HostKeyReceived += (_, args) =>
+        {
+            args.CanTrust = profile.AcceptUnknownHostKey || HostKeyMatches(profile.HostKeySha256, args.HostKey);
+
+            if (!args.CanTrust)
+            {
+                capturedHostKeyValidation.MarkRejected(
+                    $"SHA256:{ComputeHostKeyFingerprint(args.HostKey)}",
+                    $"SHA256:{NormalizeHostKeyFingerprint(profile.HostKeySha256)}");
+            }
+        };
+
+        return client;
+    }
+
+    private SftpClient CreateSftpClient(ConnectionInfo connectionInfo, ConfiguredSshProfile profile, out SshHostKeyValidationState hostKeyValidation)
+    {
+        hostKeyValidation = new SshHostKeyValidationState();
+        var capturedHostKeyValidation = hostKeyValidation;
+        var client = new SftpClient(connectionInfo);
+        client.HostKeyReceived += (_, args) =>
+        {
+            args.CanTrust = profile.AcceptUnknownHostKey || HostKeyMatches(profile.HostKeySha256, args.HostKey);
+
+            if (!args.CanTrust)
+            {
+                capturedHostKeyValidation.MarkRejected(
+                    $"SHA256:{ComputeHostKeyFingerprint(args.HostKey)}",
+                    $"SHA256:{NormalizeHostKeyFingerprint(profile.HostKeySha256)}");
+            }
+        };
+
+        return client;
     }
 
     private void ConfigureHostKeyValidation(BaseClient client, ConfiguredSshProfile profile)
@@ -338,6 +500,46 @@ public sealed class SshService(
             .TrimEnd('=');
         var computed = Convert.ToBase64String(SHA256.HashData(hostKey)).TrimEnd('=');
         return string.Equals(normalizedExpected, computed, StringComparison.Ordinal);
+    }
+
+    private static string ComputeHostKeyFingerprint(byte[] hostKey) =>
+        Convert.ToBase64String(SHA256.HashData(hostKey)).TrimEnd('=');
+
+    private static string NormalizeHostKeyFingerprint(string? expectedFingerprint)
+    {
+        if (string.IsNullOrWhiteSpace(expectedFingerprint))
+        {
+            return "not_configured";
+        }
+
+        var normalized = expectedFingerprint.Trim();
+        if (normalized.StartsWith("SHA256:", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized[7..];
+        }
+
+        return normalized.TrimEnd('=');
+    }
+
+    private sealed class SshHostKeyValidationState
+    {
+        public bool WasRejected { get; private set; }
+
+        public string ExpectedSha256 { get; private set; } = string.Empty;
+
+        public string ActualSha256 { get; private set; } = string.Empty;
+
+        public void MarkRejected(string expectedSha256, string actualSha256)
+        {
+            WasRejected = true;
+            ExpectedSha256 = expectedSha256;
+            ActualSha256 = actualSha256;
+        }
+
+        public string CreateFailureMessage(ConfiguredSshProfile profile)
+        {
+            return $"SSH host key mismatch for profile '{profile.Name}' host '{profile.Host}'. Expected {ExpectedSha256}; actual {ActualSha256}.";
+        }
     }
 
     private string ResolvePath(string path) =>
@@ -411,6 +613,23 @@ public sealed class SshService(
 
     private static bool IsSudoCommand(string executable) =>
         executable.Equals("sudo", StringComparison.OrdinalIgnoreCase);
+
+    private static AuthenticationMethod CreatePasswordAuthenticationMethod(string username, string password) =>
+        new PasswordAuthenticationMethod(username, password);
+
+    private static AuthenticationMethod CreateKeyboardInteractiveAuthenticationMethod(string username, string password)
+    {
+        var method = new KeyboardInteractiveAuthenticationMethod(username);
+        method.AuthenticationPrompt += (_, e) =>
+        {
+            foreach (var prompt in e.Prompts)
+            {
+                prompt.Response = password;
+            }
+        };
+
+        return method;
+    }
 
     private static string ExtractExecutableName(string command)
     {

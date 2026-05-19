@@ -100,13 +100,22 @@ internal static class ConfiguredAgentRouterRuntimeSettingsFactory
                     : options.SshExecution.TraceRootPath.Trim(),
                 LoadRepoProfilesFile = options.SshExecution.LoadRepoProfilesFile,
                 RepoProfilesFilePath = string.IsNullOrWhiteSpace(options.SshExecution.RepoProfilesFilePath)
-                    ? Path.Combine("..", "..", "config", "agentrouter", "ssh-profiles.local.json")
+                    ? Path.Combine("..", "..", "config", "mcpserver", "ssh-profiles.local.json")
                     : options.SshExecution.RepoProfilesFilePath.Trim(),
                 LoadUserProfilesFile = options.SshExecution.LoadUserProfilesFile,
                 UserProfilesFilePath = string.IsNullOrWhiteSpace(options.SshExecution.UserProfilesFilePath)
                     ? string.Empty
                     : options.SshExecution.UserProfilesFilePath.Trim(),
                 AllowInlineProfiles = options.SshExecution.AllowInlineProfiles,
+                VaultPath = string.IsNullOrWhiteSpace(options.SshExecution.VaultPath)
+                    ? Path.Combine("..", "..", "config", "mcpserver", "ssh-vault.local.json")
+                    : options.SshExecution.VaultPath.Trim(),
+                VaultKeyPath = string.IsNullOrWhiteSpace(options.SshExecution.VaultKeyPath)
+                    ? Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "McpServer",
+                        "ssh-vault.key")
+                    : options.SshExecution.VaultKeyPath.Trim(),
                 Profiles = BuildSshProfiles(options)
             }
         };
@@ -197,9 +206,9 @@ internal static class ConfiguredAgentRouterRuntimeSettingsFactory
             Host = source.Host,
             Port = source.Port,
             Username = source.Username,
-            PasswordEnvironmentVariable = source.PasswordEnvironmentVariable,
             PrivateKeyPath = source.PrivateKeyPath,
-            PrivateKeyPassphraseEnvironmentVariable = source.PrivateKeyPassphraseEnvironmentVariable,
+            PasswordVaultItemName = source.PasswordVaultItemName,
+            PrivateKeyPassphraseVaultItemName = source.PrivateKeyPassphraseVaultItemName,
             WorkingDirectory = source.WorkingDirectory,
             HostKeySha256 = source.HostKeySha256,
             AcceptUnknownHostKey = source.AcceptUnknownHostKey,

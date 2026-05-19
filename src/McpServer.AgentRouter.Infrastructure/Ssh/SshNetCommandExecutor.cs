@@ -5,6 +5,7 @@ using System.Text;
 using LanguageExt;
 using McpServer.AgentRouter.Application.Abstractions;
 using McpServer.AgentRouter.Domain.Ssh;
+using McpServer.Infrastructure.Ssh;
 using Microsoft.Extensions.Logging;
 using Renci.SshNet;
 using Renci.SshNet.Common;
@@ -14,13 +15,16 @@ namespace McpServer.AgentRouter.Infrastructure.Ssh;
 public sealed class SshNetCommandExecutor : ISshCommandExecutor
 {
     private readonly IAgentRouterRuntimePathResolver _pathResolver;
+    private readonly SshCredentialVaultStore _credentialVaultStore;
     private readonly ILogger<SshNetCommandExecutor> _logger;
 
     public SshNetCommandExecutor(
         IAgentRouterRuntimePathResolver pathResolver,
+        SshCredentialVaultStore credentialVaultStore,
         ILogger<SshNetCommandExecutor> logger)
     {
         _pathResolver = pathResolver ?? throw new ArgumentNullException(nameof(pathResolver));
+        _credentialVaultStore = credentialVaultStore ?? throw new ArgumentNullException(nameof(credentialVaultStore));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -41,10 +45,42 @@ public sealed class SshNetCommandExecutor : ISshCommandExecutor
             return LanguageExt.Common.Error.New($"SSH profile '{command.ProfileName}' is missing host.");
         }
 
+        if (string.IsNullOrWhiteSpace(command.Username))
+        {
+            return LanguageExt.Common.Error.New($"SSH profile '{command.ProfileName}' is missing Username.");
+        }
+
         try
         {
-            return await Task.Run(() => ExecuteSshCommand(command, cancellationToken), cancellationToken)
-                .ConfigureAwait(false);
+            SshAuthenticationException? authFailure = null;
+            foreach (var attempt in CreateConnectionAttempts(command))
+            {
+                try
+                {
+                    return await Task.Run(() => ExecuteSshCommand(command, attempt.ConnectionInfo, cancellationToken), cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (SshAuthenticationException ex)
+                {
+                    authFailure = ex;
+                    _logger.LogWarning(
+                        ex,
+                        "SSH authentication attempt {Attempt} failed for profile {Profile} on {Host}:{Port}",
+                        attempt.Description,
+                        command.ProfileName,
+                        command.Host,
+                        command.Port);
+                }
+            }
+
+            if (authFailure is not null)
+            {
+                return LanguageExt.Common.Error.New(
+                    $"SSH authentication failed for profile '{command.ProfileName}': {authFailure.Message}");
+            }
+
+            return LanguageExt.Common.Error.New(
+                $"SSH profile '{command.ProfileName}' did not provide a usable authentication method.");
         }
         catch (OperationCanceledException)
         {
@@ -78,29 +114,30 @@ public sealed class SshNetCommandExecutor : ISshCommandExecutor
 
     private SshCommandExecutionResult ExecuteSshCommand(
         SshExecutionCommand command,
+        ConnectionInfo connectionInfo,
         CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
         cancellationToken.ThrowIfCancellationRequested();
 
-        using var client = CreateClient(command, out var hostKeyValidation);
+        using var client = CreateClient(command, connectionInfo, out var hostKeyValidation);
         client.ConnectionInfo.Timeout = TimeSpan.FromSeconds(Math.Max(1, command.TimeoutSeconds));
         try
         {
             client.Connect();
         }
-        catch (SshConnectionException ex) when (hostKeyValidation.WasRejected)
+        catch (Exception ex) when (hostKeyValidation.WasRejected && ex is SshException)
         {
             throw new SshException(hostKeyValidation.CreateFailureMessage(command), ex);
         }
 
-        cancellationToken.ThrowIfCancellationRequested();
-
-        using var sshCommand = client.CreateCommand(BuildRemoteCommand(command));
-        sshCommand.CommandTimeout = TimeSpan.FromSeconds(Math.Max(1, command.TimeoutSeconds));
-
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            using var sshCommand = client.CreateCommand(BuildRemoteCommand(command));
+            sshCommand.CommandTimeout = TimeSpan.FromSeconds(Math.Max(1, command.TimeoutSeconds));
+
             var stdout = sshCommand.Execute();
             var stderr = sshCommand.Error;
             stopwatch.Stop();
@@ -112,7 +149,7 @@ public sealed class SshNetCommandExecutor : ISshCommandExecutor
 
             return new SshCommandExecutionResult
             {
-                ExitCode = sshCommand.ExitStatus ?? -1,
+                ExitCode = sshCommand.ExitStatus.GetValueOrDefault(-1),
                 Stdout = stdout,
                 Stderr = stderr,
                 StdoutTruncated = stdoutTruncated,
@@ -124,8 +161,7 @@ public sealed class SshNetCommandExecutor : ISshCommandExecutor
         {
             stopwatch.Stop();
             _logger.LogWarning(
-                "SSH command {Command} via profile {Profile} timed out after {TimeoutSeconds}s.",
-                command.Command,
+                "SSH command via profile {Profile} timed out after {TimeoutSeconds}s.",
                 command.ProfileName,
                 command.TimeoutSeconds);
 
@@ -137,19 +173,20 @@ public sealed class SshNetCommandExecutor : ISshCommandExecutor
                 ElapsedMilliseconds = stopwatch.ElapsedMilliseconds
             };
         }
+        finally
+        {
+            if (client.IsConnected)
+            {
+                client.Disconnect();
+            }
+        }
     }
 
     private SshClient CreateClient(
         SshExecutionCommand command,
+        ConnectionInfo connectionInfo,
         out SshHostKeyValidationState hostKeyValidation)
     {
-        var methods = CreateAuthenticationMethods(command);
-        var connectionInfo = new ConnectionInfo(
-            command.Host,
-            command.Port <= 0 ? 22 : command.Port,
-            command.Username,
-            methods.ToArray());
-
         hostKeyValidation = new SshHostKeyValidationState();
         var capturedHostKeyValidation = hostKeyValidation;
         var client = new SshClient(connectionInfo);
@@ -167,9 +204,9 @@ public sealed class SshNetCommandExecutor : ISshCommandExecutor
         return client;
     }
 
-    private IList<AuthenticationMethod> CreateAuthenticationMethods(SshExecutionCommand command)
+    private IReadOnlyList<SshConnectionAttempt> CreateConnectionAttempts(SshExecutionCommand command)
     {
-        var methods = new List<AuthenticationMethod>();
+        var attempts = new List<SshConnectionAttempt>();
 
         if (!string.IsNullOrWhiteSpace(command.PrivateKeyPath))
         {
@@ -179,33 +216,68 @@ public sealed class SshNetCommandExecutor : ISshCommandExecutor
                 throw new InvalidOperationException($"Private key file was not found: {privateKeyPath}");
             }
 
-            var passphrase = ResolveEnvironmentVariable(command.PrivateKeyPassphraseEnvironmentVariable);
+            var passphrase = string.IsNullOrWhiteSpace(command.PrivateKeyPassphraseVaultItemName)
+                ? null
+                : ResolveRequiredVaultSecret(command.PrivateKeyPassphraseVaultItemName, "private key passphrase");
             PrivateKeyFile privateKey = string.IsNullOrEmpty(passphrase)
                 ? new PrivateKeyFile(privateKeyPath)
                 : new PrivateKeyFile(privateKeyPath, passphrase);
 
-            methods.Add(new PrivateKeyAuthenticationMethod(command.Username, privateKey));
+            attempts.Add(new SshConnectionAttempt(
+                CreateConnectionInfo(command, [new PrivateKeyAuthenticationMethod(command.Username, privateKey)]),
+                "private-key"));
         }
 
-        var password = ResolveEnvironmentVariable(command.PasswordEnvironmentVariable);
-        if (!string.IsNullOrWhiteSpace(command.PasswordEnvironmentVariable) && string.IsNullOrEmpty(password))
+        if (!string.IsNullOrWhiteSpace(command.PasswordVaultItemName))
+        {
+            var password = ResolveRequiredVaultSecret(command.PasswordVaultItemName, "password");
+            attempts.Add(new SshConnectionAttempt(
+                CreateConnectionInfo(command, [CreateKeyboardInteractiveAuthenticationMethod(command.Username, password)]),
+                "keyboard-interactive"));
+            attempts.Add(new SshConnectionAttempt(
+                CreateConnectionInfo(command, [CreatePasswordAuthenticationMethod(command.Username, password)]),
+                "password"));
+        }
+
+        if (attempts.Count == 0)
         {
             throw new InvalidOperationException(
-                $"SSH secret missing for profile '{command.ProfileName}': environment variable '{command.PasswordEnvironmentVariable}' is not set or is empty.");
+                $"SSH profile '{command.ProfileName}' must configure PasswordVaultItemName and/or PrivateKeyPath. Raw credentials are not accepted in requests.");
         }
 
-        if (!string.IsNullOrEmpty(password))
+        return attempts;
+    }
+
+    private static ConnectionInfo CreateConnectionInfo(
+        SshExecutionCommand command,
+        IEnumerable<AuthenticationMethod> authMethods) =>
+        new(
+            command.Host,
+            command.Port <= 0 ? 22 : command.Port,
+            command.Username,
+            authMethods.ToArray());
+
+    private string ResolveRequiredVaultSecret(string? itemName, string purpose)
+    {
+        if (string.IsNullOrWhiteSpace(itemName))
         {
-            methods.Add(new PasswordAuthenticationMethod(command.Username, password));
+            throw new InvalidOperationException($"SSH {purpose} vault item name is missing.");
         }
 
-        if (methods.Count == 0)
+        if (_credentialVaultStore is null)
         {
             throw new InvalidOperationException(
-                $"SSH profile '{command.ProfileName}' must configure PrivateKeyPath or PasswordEnvironmentVariable. Raw credentials are not accepted in requests.");
+                $"SSH {purpose} vault item '{itemName}' was requested, but no SSH credential vault store is configured.");
         }
 
-        return methods;
+        var secret = _credentialVaultStore.ResolveSecret(itemName);
+        if (string.IsNullOrEmpty(secret))
+        {
+            throw new InvalidOperationException(
+                $"SSH {purpose} vault item '{itemName}' resolved to an empty secret. Check that the credential source is visible to this process.");
+        }
+
+        return secret;
     }
 
     private static SshHostKeyDecision EvaluateHostKey(
@@ -297,6 +369,27 @@ public sealed class SshNetCommandExecutor : ISshCommandExecutor
         return "'" + value.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
     }
 
+    private sealed record SshConnectionAttempt(
+        ConnectionInfo ConnectionInfo,
+        string Description);
+
+    private static AuthenticationMethod CreatePasswordAuthenticationMethod(string username, string password) =>
+        new PasswordAuthenticationMethod(username, password);
+
+    private static AuthenticationMethod CreateKeyboardInteractiveAuthenticationMethod(string username, string password)
+    {
+        var method = new KeyboardInteractiveAuthenticationMethod(username);
+        method.AuthenticationPrompt += (_, e) =>
+        {
+            foreach (var prompt in e.Prompts)
+            {
+                prompt.Response = password;
+            }
+        };
+
+        return method;
+    }
+
     private static string Truncate(
         string? value,
         int maxChars,
@@ -315,16 +408,6 @@ public sealed class SshNetCommandExecutor : ISshCommandExecutor
 
         truncated = true;
         return value[..limit];
-    }
-
-    private static string? ResolveEnvironmentVariable(string? variableName)
-    {
-        if (string.IsNullOrWhiteSpace(variableName))
-        {
-            return null;
-        }
-
-        return Environment.GetEnvironmentVariable(variableName.Trim());
     }
 
     private string ResolveConfiguredPath(string path)

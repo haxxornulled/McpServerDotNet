@@ -6,13 +6,10 @@ namespace McpServer.UnitTests.Infrastructure;
 public sealed class FileSystemSshProfileStoreTests
 {
     [Fact]
-    public void Save_And_Load_Profiles_Preserves_Encrypted_Credentials()
+    public void Save_And_Load_Profiles_Preserves_Vault_Item_References()
     {
         var root = Path.Combine(Path.GetTempPath(), $"mcpserver-ssh-profiles-{Guid.NewGuid():N}");
         var repoFile = "ssh-profiles.local.json";
-        var vaultPath = Path.Combine(root, "vault.key");
-        var vault = new SshCredentialVault(vaultPath);
-        var secret = vault.Protect("super-secret-password");
 
         var profiles = new[]
         {
@@ -21,9 +18,9 @@ public sealed class FileSystemSshProfileStoreTests
                 "127.0.0.1",
                 22,
                 "tester",
-                PasswordEnvironmentVariable: null,
                 PrivateKeyPath: null,
-                PrivateKeyPassphraseEnvironmentVariable: null,
+                PasswordVaultItemName: "dev",
+                PrivateKeyPassphraseVaultItemName: "dev-passphrase",
                 WorkingDirectory: "/tmp",
                 HostKeySha256: "SHA256:dGVzdA",
                 AcceptUnknownHostKey: false,
@@ -31,10 +28,6 @@ public sealed class FileSystemSshProfileStoreTests
                 DeniedCommands: [],
                 AllowedRemotePathPrefixes: ["/tmp"],
                 AllowSudoCommand: false)
-            {
-                PasswordSecret = secret,
-                PasswordVaultItemName = "dev"
-            }
         };
 
         FileSystemSshProfileStore.SaveProfiles(root, repoFile, profiles);
@@ -50,8 +43,7 @@ public sealed class FileSystemSshProfileStoreTests
 
         Assert.Single(loaded);
         var loadedProfile = loaded[0];
-        Assert.NotNull(loadedProfile.PasswordSecret);
         Assert.Equal("dev", loadedProfile.PasswordVaultItemName);
-        Assert.Equal("super-secret-password", vault.Unprotect(loadedProfile.PasswordSecret!));
+        Assert.Equal("dev-passphrase", loadedProfile.PrivateKeyPassphraseVaultItemName);
     }
 }

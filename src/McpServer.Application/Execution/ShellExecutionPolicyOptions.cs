@@ -17,8 +17,6 @@ public sealed class ShellExecutionPolicyOptions
             "mshta",
             "net",
             "netsh",
-            "powershell",
-            "pwsh",
             "reg",
             "regsvr32",
             "rm",
@@ -34,39 +32,19 @@ public sealed class ShellExecutionPolicyOptions
 
     public ShellExecutionPolicyOptions(
         bool AllowShellFallback,
-        bool AllowWindowsCompatibilityShell,
         IReadOnlyCollection<string>? AllowedCommands,
         IReadOnlyCollection<string>? DeniedCommands,
         int MaxTimeoutSeconds,
         int MaxOutputChars)
     {
         this.AllowShellFallback = AllowShellFallback;
-        this.AllowWindowsCompatibilityShell = AllowWindowsCompatibilityShell;
         this.AllowedCommands = NormalizeCommandCollection(AllowedCommands, Array.Empty<string>());
         this.DeniedCommands = NormalizeCommandCollection(DeniedCommands, DefaultDeniedCommands);
         this.MaxTimeoutSeconds = MaxTimeoutSeconds;
         this.MaxOutputChars = MaxOutputChars;
     }
 
-    public ShellExecutionPolicyOptions(
-        bool AllowShellFallback,
-        IReadOnlyCollection<string>? AllowedCommands,
-        IReadOnlyCollection<string>? DeniedCommands,
-        int MaxTimeoutSeconds,
-        int MaxOutputChars)
-        : this(
-            AllowShellFallback: AllowShellFallback,
-            AllowWindowsCompatibilityShell: false,
-            AllowedCommands: AllowedCommands,
-            DeniedCommands: DeniedCommands,
-            MaxTimeoutSeconds: MaxTimeoutSeconds,
-            MaxOutputChars: MaxOutputChars)
-    {
-    }
-
     public bool AllowShellFallback { get; }
-
-    public bool AllowWindowsCompatibilityShell { get; }
 
     public IReadOnlyCollection<string> AllowedCommands { get; }
 
@@ -78,7 +56,6 @@ public sealed class ShellExecutionPolicyOptions
 
     public static ShellExecutionPolicyOptions BuildAndTestOnly { get; } = new(
         AllowShellFallback: false,
-        AllowWindowsCompatibilityShell: false,
         AllowedCommands:
         [
             "dotnet",
@@ -90,7 +67,6 @@ public sealed class ShellExecutionPolicyOptions
 
     public static ShellExecutionPolicyOptions Permissive { get; } = new(
         AllowShellFallback: true,
-        AllowWindowsCompatibilityShell: true,
         AllowedCommands: [],
         DeniedCommands: [],
         MaxTimeoutSeconds: 600,

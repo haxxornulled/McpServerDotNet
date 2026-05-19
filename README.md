@@ -9,8 +9,6 @@
 - `McpServer.Host`: a stdio Model Context Protocol server for workspace-aware tools, resources, prompts, and local inference helpers.
 - `McpServer.AgentRouter.Host`: a loopback HTTP host with OpenAI-compatible chat completions plus bounded agent, MCP, shell, and SSH execution workflows.
 
-This repo is not a scaffold. The codebase already contains the working hosts, policy gates, trace storage, test coverage, and local harness scripts used to validate them.
-
 ## What ships
 
 ### `McpServer.Host`
@@ -95,13 +93,39 @@ The router uses `McpServer.Host` as its controlled child-process tool boundary f
 - AgentRouter MCP tool execution is allowlist-based by default.
 - AgentRouter shell execution is allowlist-based, bounded by a working-directory root, and blocks inline shell command switches by default.
 - AgentRouter SSH execution is named-profile based and keeps raw credentials out of request bodies.
-- `McpServer.Host` SSH profiles load from `config/mcpserver/ssh-profiles.local.json` by default, with user-local overrides in `%LOCALAPPDATA%\McpServer\ssh-profiles.json`, and encrypted password secrets stored alongside a local vault key at `%LOCALAPPDATA%\McpServer\ssh-vault.key`.
-- SSH vault items are managed with `tools/McpServer.SshVaultCli`; profiles can point at a named vault item through `passwordVaultItemName` instead of embedding a secret or reading from an environment variable.
+- `McpServer.Host` SSH profiles load from `config/mcpserver/ssh-profiles.local.json` by default, with user-local overrides in `%LOCALAPPDATA%\McpServer\ssh-profiles.json`.
+- SSH vault items are managed with `tools/McpServer.SshVaultCli`; profiles can point at a named vault item through `passwordVaultItemName` instead of embedding a secret or reading from an environment variable. See [SSH Vault](docs/ssh-vault.md).
 - Both hosts write operational traces/logs to repo-local runtime paths instead of mixing them into source directories.
+
+## Preferred validation
+
+```text
+dotnet run --project .\tools\McpServer.AgentRouter.Tools -- verify
+```
+
+That typed C# harness restores, builds, and runs the full repo test suite without relying on shell-script orchestration. It now streams the child `dotnet` output into your terminal instead of hiding the process.
+
+## CLI quick reference
+
+| Command | Purpose | When to use |
+| --- | --- | --- |
+| `dotnet run --project .\tools\McpServer.AgentRouter.Tools -- verify` | Restore, build, and test the repo in the supported C# CLI path. | Use for the default repo validation pass. |
+| `dotnet run --project .\tools\McpServer.AgentRouter.Tools -- smoke` | Run the higher-fidelity AgentRouter runtime harness. | Use when you want end-to-end runtime validation beyond build/test. |
+| `dotnet run --project .\tools\McpServer.AgentRouter.Tools -- stress` | Run the AgentRouter stress harness. | Use for repeatable workload and response-shape checks. |
+| `dotnet run --project .\tools\McpServer.AgentRouter.Tools -- provider-unavailable` | Probe the provider-failure path. | Use when validating fallback and error handling. |
+| `dotnet run --project .\tools\McpServer.SshVaultCli -- help` | Show SSH vault CLI usage. | Use when adding, listing, verifying, or deleting vault items. |
+| `dotnet run --project .\tools\McpServer.SshVaultCli -- add dev --secret-file .\secrets\dev-password.txt --description "Standard dev credential"` | Add a vault item from a local secret file. | Use when you already have the secret in a file and want a repeatable import. |
+| `dotnet run --project .\tools\McpServer.SshVaultCli -- verify dev` | Verify that a vault item decrypts correctly. | Use before wiring the secret into an SSH profile. |
+| `dotnet run --project .\tools\McpServer.SshVaultCli -- delete dev` | Remove a vault item. | Use when rotating or cleaning up credentials. |
+| `cmd.exe /c "set MCPSERVER_INTEGRATION_LIVE_SSH=1&& dotnet test .\tests\McpServer.IntegrationTests\McpServer.IntegrationTests.csproj -c Release --no-build --filter FullyQualifiedName~Ssh -v minimal"` | Run the live SSH integration slice against the repo-local profile and vault. | Use when you need to prove real host login and command parsing. |
+
+`verify` streams child `dotnet` output into your terminal. When SSH execution is enabled, `smoke` also echoes SSH stdout/stderr blocks back to the terminal for each request.
 
 ## Build and test baseline
 
-```powershell
+If you need to mirror CI directly, run the raw .NET commands below:
+
+```text
 dotnet restore .\McpServer.slnx
 dotnet build .\McpServer.slnx -c Release --no-restore -v minimal
 dotnet test .\tests\McpServer.UnitTests\McpServer.UnitTests.csproj -c Release --no-build -v minimal
@@ -109,66 +133,31 @@ dotnet test .\tests\McpServer.IntegrationTests\McpServer.IntegrationTests.csproj
 dotnet test .\tests\McpServer.AgentRouter.UnitTests\McpServer.AgentRouter.UnitTests.csproj -c Release --no-build -v minimal
 ```
 
-Deterministic integration coverage lives in `tests/McpServer.IntegrationTests`; live-provider or stress harnesses remain in `scripts/` and `tools/`.
+Deterministic integration coverage lives in `tests/McpServer.IntegrationTests`; live-provider and stress harnesses live in `tools/`.
 
 ## Run locally
 
 Run the stdio host:
 
-```powershell
+```text
 dotnet run --project .\src\McpServer.Host\McpServer.Host.csproj -c Release
 ```
 
 Run the AgentRouter host directly:
 
-```powershell
+```text
 dotnet run --project .\src\McpServer.AgentRouter.Host\McpServer.AgentRouter.Host.csproj -c Release
 ```
 
-Run the preferred local stack script:
+Run the preferred AgentRouter runtime harness:
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Start-AgentRouterStack.ps1
-```
-
-Pass `-RunSmoke` to that script when you want the typed .NET smoke harness to run the full default MCP tool suite against the freshly started AgentRouter stack.
-
-## Validation harnesses
-
-Quick router smoke:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-AgentRouter.ps1
-```
-
-Router stress:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Stress-AgentRouter.ps1
-```
-
-Typed harness:
-
-```powershell
+```text
 dotnet run --project .\tools\McpServer.AgentRouter.Tools -- smoke
-dotnet run --project .\tools\McpServer.AgentRouter.Tools -- stress
 ```
 
-The `smoke` command includes the full default MCP tool coverage suite plus loopback web scrape coverage.
+Use `dotnet run --project .\tools\McpServer.AgentRouter.Tools -- verify` for the full repo build/test validation path. Use `smoke` when you want the higher-fidelity AgentRouter runtime harness. The supported CLI path is C#-only, and the quick reference above is the copy/paste matrix.
 
-SSH vault manager:
-
-```powershell
-dotnet run --project .\tools\McpServer.SshVaultCli -- help
-dotnet run --project .\tools\McpServer.SshVaultCli -- add dev --secret "..."
-dotnet run --project .\tools\McpServer.SshVaultCli -- delete dev
-```
-
-stdio MCP smoke:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-StdioFramedMcp.ps1
-```
+For the full vault workflow, file layout, and privileged profile guidance, see [SSH Vault](docs/ssh-vault.md).
 
 ## Documentation
 
@@ -176,9 +165,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-StdioFram
 - [Architecture](docs/architecture.md)
 - [Method Summary](docs/method-summary.md)
 - [Workspace Configuration](docs/workspace-configuration.md)
+- [SSH Vault](docs/ssh-vault.md)
 - [Ollama Local Inference Tools](docs/ollama-local-inference-tools.md)
 - [Codex / VS Code MCP Setup](docs/codex-vscode-mcp-setup.md)
-- [Scripts](scripts/README.md)
 - [Changelog](CHANGELOG.md)
 
 ## License

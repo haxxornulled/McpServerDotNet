@@ -13,7 +13,7 @@ namespace McpServer.UnitTests.Application;
 public sealed class ShellExecToolHandlerTests
 {
     private static readonly IShellExecutionPolicy TestPolicy =
-        new ShellExecutionPolicy(new ShellExecutionPolicyOptions(true, true, ["dotnet", "git", "dir", "ls"], [], 300, 200000));
+        new ShellExecutionPolicy(new ShellExecutionPolicyOptions(true, ["dotnet", "git", "dir"], [], 300, 200000));
 
     [Fact]
     public async Task Handle_Should_Return_Structured_Result_With_Command_Output()
@@ -52,12 +52,10 @@ public sealed class ShellExecToolHandlerTests
         var processExecution = Substitute.For<IProcessExecutionService>();
         var logger = Substitute.For<ILogger<ShellExecToolHandler>>();
 
-        var expectedCommand = OperatingSystem.IsWindows() ? "pwsh" : "/bin/sh";
+        var expectedCommand = OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/sh";
         string[] expectedArguments = OperatingSystem.IsWindows()
             ? [
-                "-NoLogo",
-                "-NoProfile",
-                "-Command",
+                "/c",
                 "git clone https://github.com/haxxornulled/PF-World-Of-Warcraft-Framework.git"
             ]
             : [
@@ -97,12 +95,10 @@ public sealed class ShellExecToolHandlerTests
         var processExecution = Substitute.For<IProcessExecutionService>();
         var logger = Substitute.For<ILogger<ShellExecToolHandler>>();
 
-        var builtInCommand = OperatingSystem.IsWindows() ? "pwsh" : "dir";
+        var builtInCommand = OperatingSystem.IsWindows() ? "cmd.exe" : "dir";
         string[] expectedArguments = OperatingSystem.IsWindows()
             ? [
-                "-NoLogo",
-                "-NoProfile",
-                "-Command",
+                "/c",
                 "dir"
             ]
             : Array.Empty<string>();
@@ -126,103 +122,11 @@ public sealed class ShellExecToolHandlerTests
         await processExecution.Received(1).RunAsync(
             Arg.Is<RunProcessCommand>(command =>
                 OperatingSystem.IsWindows()
-                    ? command.Command == "pwsh"
+                    ? command.Command == "cmd.exe"
                         && command.Arguments != null
                         && command.Arguments.SequenceEqual(expectedArguments)
                     : command.Command == "dir"
                         && command.Arguments == null),
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task Handle_Should_Run_Bare_Ls_Via_PowerShell_Compatibility_On_Windows()
-    {
-        var processExecution = Substitute.For<IProcessExecutionService>();
-        var logger = Substitute.For<ILogger<ShellExecToolHandler>>();
-
-        var expectedCommand = OperatingSystem.IsWindows() ? "pwsh" : "ls";
-
-        processExecution.RunAsync(Arg.Any<RunProcessCommand>(), Arg.Any<CancellationToken>())
-            .Returns(call =>
-            {
-                var command = call.Arg<RunProcessCommand>();
-                return new ValueTask<Fin<ProcessExecutionResult>>(new ProcessExecutionResult(
-                    Command: command.Command,
-                    Arguments: command.Arguments,
-                    WorkingDirectory: "D:/workspace",
-                    ExitCode: 0,
-                    StandardOutput: string.Empty,
-                    StandardError: string.Empty,
-                    TimedOut: false,
-                    OutputTruncated: false));
-            });
-
-        var handler = new ShellExecToolHandler(processExecution, logger, TestPolicy);
-        var result = await handler.Handle(new ShellExecRequest("ls"), CancellationToken.None);
-
-        Assert.True(result.IsSucc);
-
-        var expectedArguments = new[]
-        {
-            "-NoLogo",
-            "-NoProfile",
-            "-Command",
-            "Get-ChildItem"
-        };
-
-        await processExecution.Received(1).RunAsync(
-            Arg.Is<RunProcessCommand>(command =>
-                command.Command == expectedCommand
-                    && (!OperatingSystem.IsWindows()
-                        || command.Arguments != null
-                        && command.Arguments.SequenceEqual(expectedArguments))),
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task Handle_Should_Run_Ls_With_Args_Via_PowerShell_Compatibility_On_Windows()
-    {
-        var processExecution = Substitute.For<IProcessExecutionService>();
-        var logger = Substitute.For<ILogger<ShellExecToolHandler>>();
-
-        processExecution.RunAsync(Arg.Any<RunProcessCommand>(), Arg.Any<CancellationToken>())
-            .Returns(call =>
-            {
-                var command = call.Arg<RunProcessCommand>();
-                return new ValueTask<Fin<ProcessExecutionResult>>(new ProcessExecutionResult(
-                    Command: command.Command,
-                    Arguments: command.Arguments,
-                    WorkingDirectory: "D:/workspace",
-                    ExitCode: 0,
-                    StandardOutput: string.Empty,
-                    StandardError: string.Empty,
-                    TimedOut: false,
-                    OutputTruncated: false));
-            });
-
-        var handler = new ShellExecToolHandler(processExecution, logger, TestPolicy);
-        var result = await handler.Handle(new ShellExecRequest("ls", ["-la", "."]), CancellationToken.None);
-
-        Assert.True(result.IsSucc);
-
-        var expectedWindowsArguments = new[]
-        {
-            "-NoLogo",
-            "-NoProfile",
-            "-Command",
-            "Get-ChildItem -Force '.'"
-        };
-        var expectedNonWindowsArguments = new[] { "-la", "." };
-
-        await processExecution.Received(1).RunAsync(
-            Arg.Is<RunProcessCommand>(command =>
-                OperatingSystem.IsWindows()
-                    ? command.Command == "pwsh"
-                        && command.Arguments != null
-                        && command.Arguments.SequenceEqual(expectedWindowsArguments)
-                    : command.Command == "ls"
-                        && command.Arguments != null
-                        && command.Arguments.SequenceEqual(expectedNonWindowsArguments)),
             Arg.Any<CancellationToken>());
     }
 

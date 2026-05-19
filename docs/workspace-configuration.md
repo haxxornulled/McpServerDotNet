@@ -27,20 +27,15 @@ The AgentRouter HTTP host has its own launch profile under `src/McpServer.AgentR
 
 Generate the local MCP client configs from the repo root:
 
-```powershell
-.\scripts\Install-LocalMcpClients.ps1 -Build
+```text
+dotnet run --project .\tools\McpServer.AgentRouter.Tools -- install-local-clients --build
 ```
 
-That script writes `.codex/config.toml`, `.vscode/mcp.json`, and `.mcp.json` with the repository root wired into the workspace env vars.
+That command writes `.codex/config.toml`, `.vscode/mcp.json`, and `.mcp.json` with the repository root wired into the workspace env vars.
 
 ## CLI smoke and workspace root
 
-The repo-local smoke scripts also pin the workspace root explicitly instead of guessing from the current directory:
-
-- `scripts/Test-StdioFramedMcp.ps1`
-- `scripts/Invoke-InferenceToolSmokeTest.ps1`
-
-Both should be launched from the repository root so they can resolve the repo workspace and its allowed roots without relying on IDE heuristics or shell-relative paths.
+The supported C# harnesses also pin the workspace root explicitly instead of guessing from the current directory. Use the typed `verify`, `smoke`, and `stress` commands from `tools/McpServer.AgentRouter.Tools` rather than shell-based helpers.
 
 ## Default workspace root
 
@@ -89,10 +84,13 @@ The repo-local files are resolved from the host content root, so they stay stabl
 
 Passwords should normally be stored as encrypted vault items in `ssh-vault.local.json`, then referenced from `ssh-profiles.local.json` via `passwordVaultItemName`. The dedicated vault CLI manages those entries:
 
-```powershell
+```text
 dotnet run --project .\tools\McpServer.SshVaultCli -- help
 dotnet run --project .\tools\McpServer.SshVaultCli -- add dev --secret "..."
+dotnet run --project .\tools\McpServer.SshVaultCli -- verify dev
 dotnet run --project .\tools\McpServer.SshVaultCli -- delete dev
 ```
 
-Legacy inline `passwordSecret` entries are still supported for backward compatibility, but the vault-item path is the preferred design.
+Credentials should live in the vault. Profiles should point to vault items with `passwordVaultItemName`, and private-key passphrases should use `privateKeyPassphraseVaultItemName`.
+
+For the full workflow, command reference, and privileged profile guidance, see [SSH Vault](ssh-vault.md).

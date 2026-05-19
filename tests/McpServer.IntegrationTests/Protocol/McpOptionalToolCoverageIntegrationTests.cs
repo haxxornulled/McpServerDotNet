@@ -1,4 +1,5 @@
 using System.Text.Json;
+using McpServer.Application.Ssh.Results;
 using McpServer.IntegrationTests.Infrastructure;
 using McpServer.Infrastructure.Ssh;
 using Xunit;
@@ -239,9 +240,9 @@ public sealed class McpOptionalToolCoverageIntegrationTests
                     "loopback",
                     22,
                     "integration",
-                    PasswordEnvironmentVariable: null,
                     PrivateKeyPath: null,
-                    PrivateKeyPassphraseEnvironmentVariable: null,
+                    PasswordVaultItemName: "integration",
+                    PrivateKeyPassphraseVaultItemName: null,
                     WorkingDirectory: "/workspace",
                     HostKeySha256: null,
                     AcceptUnknownHostKey: true,
@@ -275,9 +276,16 @@ public sealed class McpOptionalToolCoverageIntegrationTests
             command
         });
         McpStdioIntegrationTestSession.AssertToolSucceeded(executeResponse, "ssh.execute");
-        var executeText = ReadSingleTextContent(executeResponse);
-        Assert.Contains($"profile={profileName}", executeText, StringComparison.Ordinal);
-        Assert.Contains($"command={command}", executeText, StringComparison.Ordinal);
+        var executeResult = ReadSshCommandResult(executeResponse);
+        Assert.Equal(profileName, executeResult.Profile);
+        Assert.Equal("loopback", executeResult.Host);
+        Assert.Equal("integration", executeResult.Username);
+        Assert.Equal(command, executeResult.Command);
+        Assert.Equal("/workspace", executeResult.WorkingDirectory);
+        Assert.Equal(0, executeResult.ExitCode);
+        Assert.False(executeResult.TimedOut);
+        Assert.False(executeResult.OutputTruncated);
+        Assert.Contains($"command={command}", executeResult.StandardOutput, StringComparison.Ordinal);
 
         using var sudoResponse = await session.CallToolAsync("ssh.execute", new
         {
@@ -286,9 +294,16 @@ public sealed class McpOptionalToolCoverageIntegrationTests
             args = new[] { "whoami" }
         });
         McpStdioIntegrationTestSession.AssertToolSucceeded(sudoResponse, "ssh.execute");
-        var sudoText = ReadSingleTextContent(sudoResponse);
-        Assert.Contains($"profile={profileName}", sudoText, StringComparison.Ordinal);
-        Assert.Contains("command=sudo", sudoText, StringComparison.Ordinal);
+        var sudoResult = ReadSshCommandResult(sudoResponse);
+        Assert.Equal(profileName, sudoResult.Profile);
+        Assert.Equal("loopback", sudoResult.Host);
+        Assert.Equal("integration", sudoResult.Username);
+        Assert.Equal("sudo", sudoResult.Command);
+        Assert.Equal("/workspace", sudoResult.WorkingDirectory);
+        Assert.Equal(0, sudoResult.ExitCode);
+        Assert.False(sudoResult.TimedOut);
+        Assert.False(sudoResult.OutputTruncated);
+        Assert.Contains("command=sudo", sudoResult.StandardOutput, StringComparison.Ordinal);
 
         var content = $"McpServer integration test {DateTimeOffset.UtcNow:O}{Environment.NewLine}";
         using var writeResponse = await session.CallToolAsync("ssh.write_text", new
@@ -304,6 +319,61 @@ public sealed class McpOptionalToolCoverageIntegrationTests
             remoteWritePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
         Assert.True(File.Exists(localWritePath), $"Expected test backend file to exist at '{localWritePath}'.");
         Assert.Contains(content, await File.ReadAllTextAsync(localWritePath));
+    }
+
+    [Fact]
+    public async Task Live_Ssh_Tool_Should_Login_And_Parse_Result_On_Real_Host()
+    {
+        if (!ShouldRunLiveSsh())
+        {
+            return;
+        }
+
+        var workspaceRoot = CreateWorkspaceRoot();
+        var profileName = Environment.GetEnvironmentVariable("MCPSERVER_INTEGRATION_LIVE_SSH_PROFILE") ?? "root";
+        var command = Environment.GetEnvironmentVariable("MCPSERVER_INTEGRATION_LIVE_SSH_COMMAND") ?? "whoami";
+        var expectedStdout = Environment.GetEnvironmentVariable("MCPSERVER_INTEGRATION_LIVE_SSH_EXPECTED_STDOUT") ?? "root";
+        var expectedHost = Environment.GetEnvironmentVariable("MCPSERVER_INTEGRATION_LIVE_SSH_EXPECTED_HOST") ?? "173.255.205.169";
+        var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        var repoProfilesFilePath = Path.Combine(repoRoot, "config", "mcpserver", "ssh-profiles.local.json");
+        var repoVaultPath = Path.Combine(repoRoot, "config", "mcpserver", "ssh-vault.local.json");
+
+        var environment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["MCPSERVER__SSH__ENABLED"] = "true",
+            ["MCPSERVER__SSH__LOADREPOPROFILESFILE"] = "true",
+            ["MCPSERVER__SSH__LOADUSERPROFILESFILE"] = "false",
+            ["MCPSERVER__SSH__ALLOWINLINEPROFILES"] = "false",
+            ["MCPSERVER__SSH__REPOPROFILESFILEPATH"] = repoProfilesFilePath,
+            ["MCPSERVER__SSH__VAULTPATH"] = repoVaultPath,
+            ["MCPSERVER__SSH__ALLOWUNKNOWNHOSTKEY"] = "false"
+        };
+
+        await using var session = await McpStdioIntegrationTestSession.StartInitializedAsync(HostProjectPath, workspaceRoot, environment);
+
+        using var listResponse = await session.ListToolsAsync();
+        var toolNames = McpStdioIntegrationTestSession.GetToolNames(listResponse);
+        Assert.Contains("ssh.execute", toolNames);
+
+        using var executeResponse = await session.CallToolAsync("ssh.execute", new
+        {
+            profile = profileName,
+            command,
+            working_directory = "/root"
+        });
+        McpStdioIntegrationTestSession.AssertToolSucceeded(executeResponse, "ssh.execute");
+
+        var executeResult = ReadSshCommandResult(executeResponse);
+        Assert.Equal(profileName, executeResult.Profile);
+        Assert.Equal(expectedHost, executeResult.Host);
+        Assert.Equal("root", executeResult.Username);
+        Assert.Equal(command, executeResult.Command);
+        Assert.Equal("/root", executeResult.WorkingDirectory);
+        Assert.Equal(0, executeResult.ExitCode);
+        Assert.False(executeResult.TimedOut);
+        Assert.False(executeResult.OutputTruncated);
+        Assert.Empty(executeResult.StandardError);
+        Assert.Contains(expectedStdout, executeResult.StandardOutput, StringComparison.Ordinal);
     }
 
     private static async Task AssertToolSucceeds(
@@ -341,6 +411,25 @@ public sealed class McpOptionalToolCoverageIntegrationTests
         var content = result.GetProperty("content").EnumerateArray().Single();
         return content.GetProperty("text").GetString()
             ?? throw new InvalidOperationException("Tool response text content was missing.");
+    }
+
+    private static SshCommandResult ReadSshCommandResult(JsonDocument response)
+    {
+        var text = ReadSingleTextContent(response);
+        return JsonSerializer.Deserialize<SshCommandResult>(
+            text,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                PropertyNameCaseInsensitive = true
+            })
+            ?? throw new InvalidOperationException("SSH tool response could not be parsed.");
+    }
+
+    private static bool ShouldRunLiveSsh()
+    {
+        var enabled = Environment.GetEnvironmentVariable("MCPSERVER_INTEGRATION_LIVE_SSH");
+        return string.Equals(enabled, "1", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(enabled, "true", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string CreateWorkspaceRoot()

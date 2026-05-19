@@ -15,7 +15,7 @@ These instructions apply to the entire repository.
 
 When validating CI-related fixes, mirror the workflow exactly:
 
-```powershell
+```text
 dotnet restore .\McpServer.slnx
 dotnet build .\McpServer.slnx -c Release --no-restore -v minimal
 dotnet test .\tests\McpServer.UnitTests\McpServer.UnitTests.csproj -c Release --no-build -v minimal
@@ -38,7 +38,7 @@ When a user asks to kick CI, inspect a failed run, or fix CI:
 
 Useful commands:
 
-```powershell
+```text
 gh run view <run-id> --json status,conclusion,url,jobs,displayTitle,headSha,updatedAt
 gh run view <run-id> --log-failed
 gh workflow run .github/workflows/ci.yml --ref main

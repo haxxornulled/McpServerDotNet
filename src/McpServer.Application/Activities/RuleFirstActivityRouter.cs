@@ -76,7 +76,7 @@ public sealed class RuleFirstActivityRouter(IActivityProfileRegistry profiles) :
             return ActivityKind.Documentation;
         }
 
-        if (ContainsAny(text, "command", "powershell", "install", "configure", "setup"))
+        if (ContainsAny(text, "command", "shell", "install", "configure", "setup"))
         {
             return ActivityKind.CommandPlan;
         }

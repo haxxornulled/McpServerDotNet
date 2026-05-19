@@ -386,6 +386,16 @@ public sealed class SshExecutionRuntimeSettings
     public bool AllowInlineProfiles { get; init; }
 
     /// <summary>
+    /// Gets or sets the repository vault file path.
+    /// </summary>
+    public required string VaultPath { get; init; }
+
+    /// <summary>
+    /// Gets or sets the vault key file path.
+    /// </summary>
+    public required string VaultKeyPath { get; init; }
+
+    /// <summary>
     /// Gets or sets the loaded SSH profiles.
     /// </summary>
     public required IReadOnlyDictionary<string, SshProfileDefinition> Profiles { get; init; }

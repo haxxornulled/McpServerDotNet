@@ -1,11 +1,14 @@
 using Autofac;
 using McpServer.AgentRouter.Application.Abstractions;
+using McpServer.AgentRouter.Application.Runtime;
 using McpServer.AgentRouter.Infrastructure.AgentLoops;
 using McpServer.AgentRouter.Infrastructure.Mcp;
 using McpServer.AgentRouter.Infrastructure.Ollama;
 using McpServer.AgentRouter.Infrastructure.Shell;
 using McpServer.AgentRouter.Infrastructure.Stores;
 using McpServer.AgentRouter.Infrastructure.Ssh;
+using McpServer.Infrastructure.Ssh;
+using AgentRouterSshProfileStore = McpServer.AgentRouter.Infrastructure.Ssh.FileSystemSshProfileStore;
 
 namespace McpServer.AgentRouter.Infrastructure.DependencyInjection;
 
@@ -49,8 +52,16 @@ public sealed class AgentRouterInfrastructureModule : Module
             .As<IShellExecutionTraceWriter>()
             .SingleInstance();
 
-        builder.RegisterType<FileSystemSshProfileStore>()
+        builder.RegisterType<AgentRouterSshProfileStore>()
             .As<ISshProfileStore>()
+            .SingleInstance();
+
+        builder.Register(ctx =>
+            new SshCredentialVaultStore(
+                ctx.Resolve<IAgentRouterRuntimePathResolver>().ResolveRelativeToContentRoot(ctx.Resolve<SshExecutionRuntimeSettings>().VaultPath),
+                ctx.Resolve<IAgentRouterRuntimePathResolver>().ResolveRelativeToContentRoot(ctx.Resolve<SshExecutionRuntimeSettings>().VaultKeyPath),
+                AppContext.BaseDirectory))
+            .AsSelf()
             .SingleInstance();
 
         builder.RegisterType<FileSystemSshExecutionTraceWriter>()

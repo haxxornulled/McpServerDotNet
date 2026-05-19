@@ -74,13 +74,13 @@ MCPSERVER__OLLAMA__ALLOWNONLOOPBACKBASEURL=false
 
 The repo does not keep machine-local `.codex/config.toml`, `.vscode/mcp.json`, or `.mcp.json` checked in. Generate them with:
 
-```powershell
-.\scripts\Install-LocalMcpClients.ps1
+```text
+dotnet run --project .\tools\McpServer.AgentRouter.Tools -- install-local-clients
 ```
 
 ## Start and verify
 
-```powershell
+```text
 ollama pull qwen3-coder:30b
 ollama pull qwen2.5-coder:14b
 ollama pull devstral-small-2

@@ -5,16 +5,15 @@ using McpServer.Application.Abstractions.Files;
 using McpServer.Application.Abstractions.Mcp;
 using McpServer.Application.Mcp.Tools;
 using McpServer.Application.Mcp.Validation;
+using McpServer.Domain.Workspace;
 using Microsoft.Extensions.Logging;
 
 namespace McpServer.Application.Mcp.Tools;
 
 public sealed class WorkspaceSetRootToolHandler(
-    IPathPolicy pathPolicy,
-    IResourcePathTranslator resourcePathTranslator,
+    McpServer.Domain.Workspace.IWorkspaceMutationService workspaceMutationService,
     ILogger<WorkspaceSetRootToolHandler> logger,
-    IWorkspaceChangeFeed? changeFeed = null,
-    IWorkspaceFileWatcher? workspaceFileWatcher = null) : IToolHandler<WorkspaceSetRootRequest>
+    IPathPolicy pathPolicy) : IToolHandler<WorkspaceSetRootRequest>
 {
     public string Name => "workspace.set_root";
     public string Description => "Sets the active workspace root to an existing directory inside the configured allowed roots and resets the active project folder to that root.";
@@ -50,35 +49,22 @@ public sealed class WorkspaceSetRootToolHandler(
             return ValueTask.FromResult<Fin<CallToolResult>>(Error.New("Path is required."));
         }
 
-        var workspaceRoot = Path.GetFullPath(request.Path);
-        if (!Directory.Exists(workspaceRoot))
-        {
-            return ValueTask.FromResult<Fin<CallToolResult>>(Error.New($"Directory not found: {workspaceRoot}"));
-        }
-
-        var validation = pathPolicy.NormalizeAndValidateWorkspacePath(workspaceRoot);
+        var validation = pathPolicy.NormalizeAndValidateWorkspacePath(request.Path);
         if (validation.IsFail)
         {
-            return ValueTask.FromResult<Fin<CallToolResult>>(PropagateFailure<CallToolResult>(validation));
+            return ValueTask.FromResult(validation.Match<Fin<CallToolResult>>(Succ: _ => throw new InvalidOperationException("Expected workspace path validation failure."), Fail: error => error));
         }
 
-        var previousWorkspaceRoot = NormalizeOrNull("workspace");
-        var changed = !string.Equals(previousWorkspaceRoot, workspaceRoot, StringComparison.OrdinalIgnoreCase);
-
-        try
+        var workspaceRoot = validation.Match(Succ: value => value, Fail: error => throw new InvalidOperationException(error.Message));
+        var transition = workspaceMutationService.SetWorkspaceRoot(workspaceRoot);
+        if (transition.IsFail)
         {
-            pathPolicy.SetWorkspaceRoot(workspaceRoot);
-        }
-        catch (Exception ex)
-        {
-            return ValueTask.FromResult<Fin<CallToolResult>>(Error.New(ex.Message));
+            return ValueTask.FromResult(PropagateFailure<CallToolResult>(transition));
         }
 
-        resourcePathTranslator.SetWorkspaceRoot(workspaceRoot);
-        changeFeed?.RecordChange("set_workspace_root", workspaceRoot);
-        workspaceFileWatcher?.SetProjectRoot(workspaceRoot);
-
-        var payload = new WorkspaceSetRootResult(workspaceRoot, workspaceRoot, changed);
+        var payload = transition.Match(
+            Succ: value => new WorkspaceSetRootResult(value.WorkspaceRoot, value.ProjectRoot, value.Changed),
+            Fail: error => throw new InvalidOperationException(error.Message));
         var content = JsonSerializer.Serialize(payload, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true });
 
         logger.LogInformation("Tool {ToolName} set workspace root to {WorkspaceRoot}", Name, workspaceRoot);
@@ -90,15 +76,7 @@ public sealed class WorkspaceSetRootToolHandler(
         StructuredContent: payload));
     }
 
-    private string? NormalizeOrNull(string path)
-    {
-        var normalized = pathPolicy.NormalizeAndValidateReadPath(path);
-        return normalized.Match(
-            Succ: value => value,
-            Fail: _ => (string?)null);
-    }
-
-    private static Fin<T> PropagateFailure<T>(Fin<string> failure) =>
+    private static Fin<T> PropagateFailure<T>(Fin<WorkspaceTransitionResult> failure) =>
         failure.Match<Fin<T>>(
             Succ: _ => throw new InvalidOperationException("Expected failure while propagating result."),
             Fail: error => error);

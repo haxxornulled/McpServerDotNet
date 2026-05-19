@@ -11,13 +11,12 @@ public sealed class ShellExecutionPolicyTests
     {
         var sut = new ShellExecutionPolicy(new ShellExecutionPolicyOptions(
             AllowShellFallback: false,
-            AllowWindowsCompatibilityShell: false,
             AllowedCommands: [],
             DeniedCommands: [],
             MaxTimeoutSeconds: 120,
             MaxOutputChars: 12000));
 
-        var result = sut.Validate(new ShellExecRequest("dotnet", ["--version"]), false, false);
+        var result = sut.Validate(new ShellExecRequest("dotnet", ["--version"]), false);
 
         Assert.True(result.IsFail);
         var error = result.Match(
@@ -31,13 +30,12 @@ public sealed class ShellExecutionPolicyTests
     {
         var sut = new ShellExecutionPolicy(new ShellExecutionPolicyOptions(
             AllowShellFallback: false,
-            AllowWindowsCompatibilityShell: false,
-            AllowedCommands: ["pwsh"],
-            DeniedCommands: ["pwsh"],
+            AllowedCommands: ["bash"],
+            DeniedCommands: ["bash"],
             MaxTimeoutSeconds: 120,
             MaxOutputChars: 12000));
 
-        var result = sut.Validate(new ShellExecRequest("pwsh", ["-NoProfile"]), false, false);
+        var result = sut.Validate(new ShellExecRequest("bash", ["-c", "echo test"]), false);
 
         Assert.True(result.IsFail);
         var error = result.Match(
@@ -51,13 +49,12 @@ public sealed class ShellExecutionPolicyTests
     {
         var sut = new ShellExecutionPolicy(new ShellExecutionPolicyOptions(
             AllowShellFallback: false,
-            AllowWindowsCompatibilityShell: false,
             AllowedCommands: ["git"],
             DeniedCommands: [],
             MaxTimeoutSeconds: 120,
             MaxOutputChars: 12000));
 
-        var result = sut.Validate(new ShellExecRequest("git status"), true, false);
+        var result = sut.Validate(new ShellExecRequest("git status"), true);
 
         Assert.True(result.IsFail);
         var error = result.Match(

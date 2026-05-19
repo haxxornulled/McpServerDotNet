@@ -23,6 +23,7 @@ public static class VaultCli
             {
                 "list" => RunList(options),
                 "add" => RunAdd(options),
+                "verify" => RunVerify(options),
                 "delete" => RunDelete(options),
                 _ => UnknownCommand(command)
             };
@@ -66,7 +67,7 @@ public static class VaultCli
         if (string.IsNullOrWhiteSpace(secret))
         {
             secret = options.Value("secret-file") is string secretFile
-                ? File.ReadAllText(secretFile)
+                ? ReadSecretFromFile(secretFile)
                 : ReadSecretFromConsole($"SSH secret for '{name}': ");
         }
 
@@ -88,6 +89,26 @@ public static class VaultCli
         }
 
         Console.WriteLine($"Deleted SSH vault item '{name}'.");
+        return 0;
+    }
+
+    private static int RunVerify(VaultCommandLineOptions options)
+    {
+        var name = options.RequiredValue("name", options.Positionals.FirstOrDefault());
+        var store = CreateStore(options);
+        var decrypted = store.ResolveSecret(name);
+        var expected = options.Value("expected")
+            ?? (options.Value("expected-file") is string expectedFile
+                ? ReadSecretFromFile(expectedFile)
+                : ReadSecretFromConsole($"Expected SSH secret for '{name}': "));
+
+        if (!string.Equals(decrypted, expected, StringComparison.Ordinal))
+        {
+            Console.Error.WriteLine($"SSH vault item '{name}' did not match the expected secret.");
+            return 1;
+        }
+
+        Console.WriteLine($"Verified SSH vault item '{name}'.");
         return 0;
     }
 
@@ -141,6 +162,12 @@ public static class VaultCli
         return new string(buffer.ToArray());
     }
 
+    private static string ReadSecretFromFile(string secretFile)
+    {
+        var secret = File.ReadAllText(secretFile);
+        return secret.TrimEnd('\r', '\n');
+    }
+
     private static bool IsHelp(string value)
     {
         return string.Equals(value, "help", StringComparison.OrdinalIgnoreCase)
@@ -163,6 +190,7 @@ SSH vault CLI
 
 Usage:
   add <name> [--secret value] [--secret-file path] [--description text] [--vault-path path] [--vault-key-path path] [--base-directory path]
+  verify <name> [--expected value] [--expected-file path] [--vault-path path] [--vault-key-path path] [--base-directory path]
   delete <name> [--vault-path path] [--vault-key-path path] [--base-directory path]
   list [--vault-path path] [--vault-key-path path] [--base-directory path]
 
@@ -170,6 +198,8 @@ Options:
   --name             Explicit item name. Optional if you pass the name positionally.
   --secret           Plaintext secret to encrypt and store.
   --secret-file      Read the plaintext secret from a file.
+  --expected         Plaintext secret to compare against during verify.
+  --expected-file    Read the expected plaintext secret from a file during verify.
   --description      Optional friendly description.
   --vault-path       Path to the vault JSON file.
   --vault-key-path   Path to the local vault key file.

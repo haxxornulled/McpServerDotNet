@@ -22,7 +22,7 @@ public sealed class AgentRouterApplicationModule : Module
 
         builder.Register(context =>
             ConfiguredAgentRouterRuntimeSettingsFactory.Create(
-                context.Resolve<IOptions<AgentRouterOptions>>().Value))
+                context.Resolve<IOptionsMonitor<AgentRouterOptions>>().CurrentValue))
             .AsSelf()
             .SingleInstance();
 

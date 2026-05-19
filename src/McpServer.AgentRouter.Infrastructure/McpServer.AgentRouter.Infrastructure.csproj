@@ -13,5 +13,6 @@
   <ItemGroup>
     <ProjectReference Include="..\McpServer.AgentRouter.Application\McpServer.AgentRouter.Application.csproj" />
     <ProjectReference Include="..\McpServer.AgentRouter.Domain\McpServer.AgentRouter.Domain.csproj" />
+    <ProjectReference Include="..\McpServer.Infrastructure\McpServer.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

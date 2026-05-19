@@ -9,7 +9,7 @@ namespace McpServer.AgentRouter.Host.Services;
 
 public sealed class AgentRouterStartupLifecycleService : IHostedLifecycleService
 {
-    private readonly IOptions<AgentRouterOptions> _options;
+    private readonly IOptionsMonitor<AgentRouterOptions> _options;
     private readonly AgentRouterRuntimeSettings _runtimeSettings;
     private readonly ILocalModelRuntimeManager _modelRuntimeManager;
     private readonly IMcpToolCatalogClient _mcpToolCatalogClient;
@@ -18,7 +18,7 @@ public sealed class AgentRouterStartupLifecycleService : IHostedLifecycleService
     private readonly ILogger<AgentRouterStartupLifecycleService> _logger;
 
     public AgentRouterStartupLifecycleService(
-        IOptions<AgentRouterOptions> options,
+        IOptionsMonitor<AgentRouterOptions> options,
         AgentRouterRuntimeSettings runtimeSettings,
         ILocalModelRuntimeManager modelRuntimeManager,
         IMcpToolCatalogClient mcpToolCatalogClient,
@@ -37,7 +37,7 @@ public sealed class AgentRouterStartupLifecycleService : IHostedLifecycleService
 
     public async Task StartingAsync(CancellationToken cancellationToken)
     {
-        var startup = _options.Value.Startup;
+        var startup = _options.CurrentValue.Startup;
         if (!startup.Enabled)
         {
             _logger.LogInformation("AgentRouter startup lifecycle orchestration is disabled.");
@@ -74,7 +74,7 @@ public sealed class AgentRouterStartupLifecycleService : IHostedLifecycleService
 
     public async Task StartedAsync(CancellationToken cancellationToken)
     {
-        var startup = _options.Value.Startup;
+        var startup = _options.CurrentValue.Startup;
         if (!startup.Enabled)
         {
             return;
@@ -118,7 +118,7 @@ public sealed class AgentRouterStartupLifecycleService : IHostedLifecycleService
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        var startup = _options.Value.Startup;
+        var startup = _options.CurrentValue.Startup;
         if (!startup.Enabled || !startup.StopManagedOllamaOnShutdown)
         {
             return;

@@ -11,6 +11,7 @@ using McpServer.Application.Mcp.Prompts;
 using McpServer.Application.Mcp.Resources;
 using McpServer.Application.Mcp.Tools;
 using McpServer.Application.Mcp.Tools.Inference;
+using McpServer.Application.Files;
 using McpServer.Infrastructure.Execution;
 using McpServer.Host.Configuration;
 using McpServer.Infrastructure.Files;
@@ -100,6 +101,10 @@ public sealed class AutofacRootModule : Module
             .As<IWorkspaceChangeFeed>()
             .SingleInstance();
 
+        builder.RegisterType<WorkspaceMutationService>()
+            .As<McpServer.Domain.Workspace.IWorkspaceMutationService>()
+            .SingleInstance();
+
         builder.Register(ctx =>
             {
                 var watcher = new WorkspaceFileWatcher(ctx.Resolve<WorkspacePathState>(), ctx.Resolve<IWorkspaceChangeFeed>());
@@ -160,7 +165,6 @@ public sealed class AutofacRootModule : Module
         {
             builder.RegisterInstance(new ShellExecutionPolicyOptions(
                     options.Shell.AllowShellFallback,
-                    options.Shell.AllowWindowsCompatibilityShell,
                     options.Shell.AllowedCommands ?? [],
                     options.Shell.DeniedCommands ?? ShellExecutionPolicyOptions.DefaultDeniedCommands,
                     Math.Max(1, options.Shell.MaxTimeoutSeconds),
@@ -262,10 +266,6 @@ public sealed class AutofacRootModule : Module
 
             if (configuredProfiles.Count > 0)
             {
-                builder.RegisterInstance(new SshCredentialVault(options.Ssh.VaultKeyPath))
-                    .AsSelf()
-                    .SingleInstance();
-
                 if (options.Ssh.UseTestBackend)
                 {
                     builder.Register(ctx => new TestSshService(
@@ -283,7 +283,6 @@ public sealed class AutofacRootModule : Module
                             configuredProfiles,
                             AppContext.BaseDirectory,
                             ctx.Resolve<ILogger<SshService>>(),
-                            ctx.Resolve<SshCredentialVault>(),
                             ctx.Resolve<SshCredentialVaultStore>()))
                         .As<ISshService>()
                         .SingleInstance();
@@ -313,19 +312,15 @@ public sealed class AutofacRootModule : Module
                 profile.Host,
                 profile.Port,
                 profile.Username,
-                profile.PasswordEnvironmentVariable,
                 profile.PrivateKeyPath,
-                profile.PrivateKeyPassphraseEnvironmentVariable,
+                profile.PasswordVaultItemName,
+                profile.PrivateKeyPassphraseVaultItemName,
                 profile.WorkingDirectory,
                 profile.HostKeySha256,
                 profile.AcceptUnknownHostKey,
                 profile.AllowedCommands,
                 profile.DeniedCommands,
                 profile.AllowedRemotePathPrefixes,
-                profile.AllowSudoCommand)
-            {
-                PasswordSecret = profile.PasswordSecret,
-                PasswordVaultItemName = profile.PasswordVaultItemName
-            })
+                profile.AllowSudoCommand))
             .ToArray();
 }

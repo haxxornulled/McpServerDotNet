@@ -66,8 +66,7 @@ namespace McpServer.Application.Mcp.Tools
             }
 
             var requiresShellFallback = request.Args is not { Length: > 0 } && ShouldUseShellFallback(request.Command);
-            var requiresWindowsCompatibilityShell = OperatingSystem.IsWindows() && ShouldUseWindowsCompatibilityShell(request.Command);
-            var policyResult = shellExecutionPolicy.Validate(request, requiresShellFallback, requiresWindowsCompatibilityShell);
+            var policyResult = shellExecutionPolicy.Validate(request, requiresShellFallback);
             if (policyResult.IsFail)
             {
                 return PropagateFailure<CallToolResult>(policyResult);
@@ -126,21 +125,6 @@ namespace McpServer.Application.Mcp.Tools
 
         private static RunProcessCommand BuildExecutionCommand(ShellExecRequest request)
         {
-            if (OperatingSystem.IsWindows() && ShouldUseWindowsCompatibilityShell(request.Command))
-            {
-                return new RunProcessCommand(
-                    "pwsh",
-                    [
-                        "-NoLogo",
-                        "-NoProfile",
-                        "-Command",
-                        BuildWindowsCompatibilityCommand(request.Command, request.Args)
-                    ],
-                    request.WorkingDirectory,
-                    request.TimeoutSeconds,
-                    request.MaxOutputChars);
-            }
-
             if (request.Args is { Length: > 0 } || !ShouldUseShellFallback(request.Command))
             {
                 return new RunProcessCommand(request.Command, request.Args, request.WorkingDirectory, request.TimeoutSeconds, request.MaxOutputChars);
@@ -148,11 +132,9 @@ namespace McpServer.Application.Mcp.Tools
 
             return OperatingSystem.IsWindows()
                 ? new RunProcessCommand(
-                    "pwsh",
+                    "cmd.exe",
                     [
-                        "-NoLogo",
-                        "-NoProfile",
-                        "-Command",
+                        "/c",
                         request.Command
                     ],
                     request.WorkingDirectory,
@@ -172,59 +154,6 @@ namespace McpServer.Application.Mcp.Tools
         private static bool ShouldUseShellFallback(string command) =>
             LooksLikeShellLine(command) || LooksLikeWindowsShellBuiltin(command);
 
-        private static bool ShouldUseWindowsCompatibilityShell(string command)
-        {
-            if (!OperatingSystem.IsWindows())
-            {
-                return false;
-            }
-
-            var executable = ExtractExecutableName(command);
-            return WindowsCompatibilityCommands.Contains(executable);
-        }
-
-        private static string BuildWindowsCompatibilityCommand(string command, string[]? args)
-        {
-            var executable = ExtractExecutableName(command);
-            var commandArgs = args is { Length: > 0 }
-                ? args
-                : SplitBareCommandArguments(command).Skip(1).ToArray();
-
-            return executable switch
-            {
-                "ls" => BuildPowerShellLsCommand(commandArgs),
-                "grep" => WindowsCompatibilityPrelude + "grep " + JoinPowerShellArguments(commandArgs),
-                "pgrep" => WindowsCompatibilityPrelude + "pgrep " + JoinPowerShellArguments(commandArgs),
-                _ => command
-            };
-        }
-
-        private static string BuildPowerShellLsCommand(IReadOnlyCollection<string> args)
-        {
-            var force = false;
-            var paths = new List<string>();
-
-            foreach (var arg in args)
-            {
-                if (arg.StartsWith("-", StringComparison.Ordinal))
-                {
-                    force |= arg.Contains('a', StringComparison.OrdinalIgnoreCase);
-                    continue;
-                }
-
-                paths.Add(arg);
-            }
-
-            var parts = new List<string> { "Get-ChildItem" };
-            if (force)
-            {
-                parts.Add("-Force");
-            }
-
-            parts.AddRange(paths.Select(QuotePowerShellArgument));
-            return string.Join(" ", parts);
-        }
-
         private static string ExtractExecutableName(string command)
         {
             var first = SplitBareCommandArguments(command).FirstOrDefault() ?? command;
@@ -234,18 +163,12 @@ namespace McpServer.Application.Mcp.Tools
         private static IReadOnlyList<string> SplitBareCommandArguments(string command) =>
             command.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        private static string JoinPowerShellArguments(IEnumerable<string> args) =>
-            string.Join(" ", args.Select(QuotePowerShellArgument));
-
-        private static string QuotePowerShellArgument(string value) =>
-            "'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";
-
         private static bool LooksLikeShellLine(string command) =>
             command.Contains(' ') || command.Contains('\t') || command.Contains('|') || command.Contains('&') || command.Contains(';');
 
         private static bool LooksLikeWindowsShellBuiltin(string command) =>
             OperatingSystem.IsWindows() &&
-            WindowsShellBuiltins.Contains(command);
+            WindowsShellBuiltins.Contains(ExtractExecutableName(command));
 
         private static readonly System.Collections.Generic.HashSet<string> WindowsShellBuiltins = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -261,31 +184,11 @@ namespace McpServer.Application.Mcp.Tools
             "move",
             "popd",
             "pushd",
-            "pwd",
             "rd",
             "ren",
             "rename",
             "rmdir",
             "type"
         };
-
-        private static readonly System.Collections.Generic.HashSet<string> WindowsCompatibilityCommands = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "grep",
-            "ls",
-            "pgrep"
-        };
-
-        private const string WindowsCompatibilityPrelude =
-            "if (-not (Get-Command grep -ErrorAction SilentlyContinue)) { " +
-            "function global:grep { param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Args) " +
-            "if ($Args.Count -eq 0) { throw 'grep requires a pattern.' } " +
-            "$pattern = $Args[0]; " +
-            "$paths = if ($Args.Count -gt 1) { $Args[1..($Args.Count - 1)] } else { @('*') }; " +
-            "Select-String -Pattern $pattern -Path $paths } }; " +
-            "if (-not (Get-Command pgrep -ErrorAction SilentlyContinue)) { " +
-            "function global:pgrep { param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Args) " +
-            "if ($Args.Count -eq 0) { Get-Process | Select-Object -ExpandProperty Id } " +
-            "else { Get-Process | Where-Object { $_.ProcessName -like \"*$($Args[0])*\" } | Select-Object -ExpandProperty Id } } }; ";
     }
 }
