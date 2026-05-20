@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace McpServer.AgentRouter.Domain.Inference;
 
 /// <summary>
@@ -8,13 +10,19 @@ public sealed class ChatTurnMessage
     /// <summary>
     /// Initializes a new chat turn message.
     /// </summary>
-    public ChatTurnMessage(string role, string content)
+    public ChatTurnMessage(
+        string role,
+        string content,
+        string? toolCallId = null,
+        IReadOnlyList<ChatToolCall>? toolCalls = null)
     {
         Role = string.IsNullOrWhiteSpace(role)
             ? throw new ArgumentException("Role is required.", nameof(role))
             : role.Trim();
 
         Content = content ?? throw new ArgumentNullException(nameof(content));
+        ToolCallId = string.IsNullOrWhiteSpace(toolCallId) ? null : toolCallId.Trim();
+        ToolCalls = toolCalls;
     }
 
     /// <summary>
@@ -26,6 +34,66 @@ public sealed class ChatTurnMessage
     /// Gets the message content.
     /// </summary>
     public string Content { get; }
+
+    /// <summary>
+    /// Gets the tool call identifier for tool-role messages.
+    /// </summary>
+    public string? ToolCallId { get; }
+
+    /// <summary>
+    /// Gets the tool calls attached to assistant messages.
+    /// </summary>
+    public IReadOnlyList<ChatToolCall>? ToolCalls { get; }
+}
+
+/// <summary>
+/// Describes a tool the model may call.
+/// </summary>
+public sealed class ChatToolDefinition
+{
+    public ChatToolDefinition(string name, string description, JsonElement inputSchema)
+    {
+        Name = string.IsNullOrWhiteSpace(name)
+            ? throw new ArgumentException("Tool name is required.", nameof(name))
+            : name.Trim();
+
+        Description = string.IsNullOrWhiteSpace(description)
+            ? throw new ArgumentException("Tool description is required.", nameof(description))
+            : description.Trim();
+
+        InputSchema = inputSchema;
+    }
+
+    public string Name { get; }
+
+    public string Description { get; }
+
+    public JsonElement InputSchema { get; }
+}
+
+/// <summary>
+/// Describes a tool call emitted by the model.
+/// </summary>
+public sealed class ChatToolCall
+{
+    public ChatToolCall(string id, string name, JsonElement arguments)
+    {
+        Id = string.IsNullOrWhiteSpace(id)
+            ? throw new ArgumentException("Tool call id is required.", nameof(id))
+            : id.Trim();
+
+        Name = string.IsNullOrWhiteSpace(name)
+            ? throw new ArgumentException("Tool call name is required.", nameof(name))
+            : name.Trim();
+
+        Arguments = arguments;
+    }
+
+    public string Id { get; }
+
+    public string Name { get; }
+
+    public JsonElement Arguments { get; }
 }
 
 /// <summary>
@@ -40,7 +108,8 @@ public sealed class ModelInvocationRequest
         string modelProfileName,
         IReadOnlyList<ChatTurnMessage> messages,
         double? temperature,
-        int? maxOutputTokens)
+        int? maxOutputTokens,
+        IReadOnlyList<ChatToolDefinition>? tools = null)
     {
         ModelProfileName = string.IsNullOrWhiteSpace(modelProfileName)
             ? throw new ArgumentException("Model profile name is required.", nameof(modelProfileName))
@@ -49,6 +118,7 @@ public sealed class ModelInvocationRequest
         Messages = messages ?? throw new ArgumentNullException(nameof(messages));
         Temperature = temperature;
         MaxOutputTokens = maxOutputTokens;
+        Tools = tools;
     }
 
     /// <summary>
@@ -70,6 +140,11 @@ public sealed class ModelInvocationRequest
     /// Gets the optional maximum output token budget.
     /// </summary>
     public int? MaxOutputTokens { get; }
+
+    /// <summary>
+    /// Gets the optional tool definitions the model may call.
+    /// </summary>
+    public IReadOnlyList<ChatToolDefinition>? Tools { get; }
 }
 
 /// <summary>
@@ -87,7 +162,8 @@ public sealed class ModelTurnResult
         string finishReason,
         int promptTokens,
         int completionTokens,
-        long elapsedMilliseconds)
+        long elapsedMilliseconds,
+        IReadOnlyList<ChatToolCall>? toolCalls = null)
     {
         Provider = provider ?? throw new ArgumentNullException(nameof(provider));
         Model = model ?? throw new ArgumentNullException(nameof(model));
@@ -96,6 +172,7 @@ public sealed class ModelTurnResult
         PromptTokens = Math.Max(0, promptTokens);
         CompletionTokens = Math.Max(0, completionTokens);
         ElapsedMilliseconds = Math.Max(0L, elapsedMilliseconds);
+        ToolCalls = toolCalls;
     }
 
     /// <summary>
@@ -132,6 +209,11 @@ public sealed class ModelTurnResult
     /// Gets the elapsed execution time in milliseconds.
     /// </summary>
     public long ElapsedMilliseconds { get; }
+
+    /// <summary>
+    /// Gets any tool calls emitted by the model.
+    /// </summary>
+    public IReadOnlyList<ChatToolCall>? ToolCalls { get; }
 }
 
 /// <summary>

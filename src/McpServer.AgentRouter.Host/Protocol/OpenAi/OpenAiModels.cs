@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace McpServer.AgentRouter.Host.Protocol.OpenAi;
@@ -29,7 +30,13 @@ public sealed class OpenAiChatMessage
     public string Role { get; set; } = string.Empty;
 
     [JsonPropertyName("content")]
-    public string Content { get; set; } = string.Empty;
+    public string? Content { get; set; }
+
+    [JsonPropertyName("tool_call_id")]
+    public string? ToolCallId { get; set; }
+
+    [JsonPropertyName("tool_calls")]
+    public IList<OpenAiChatToolCall>? ToolCalls { get; set; }
 }
 
 public sealed class OpenAiChatCompletionRequest
@@ -48,6 +55,9 @@ public sealed class OpenAiChatCompletionRequest
 
     [JsonPropertyName("stream")]
     public bool? Stream { get; set; }
+
+    [JsonPropertyName("tools")]
+    public IList<OpenAiToolDefinition>? Tools { get; set; }
 }
 
 public sealed class OpenAiChatCompletionResponse
@@ -81,6 +91,48 @@ public sealed class OpenAiChatCompletionChoice
 
     [JsonPropertyName("finish_reason")]
     public string FinishReason { get; set; } = "stop";
+}
+
+public sealed class OpenAiToolDefinition
+{
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = "function";
+
+    [JsonPropertyName("function")]
+    public OpenAiToolFunction Function { get; set; } = new OpenAiToolFunction();
+}
+
+public sealed class OpenAiToolFunction
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("description")]
+    public string Description { get; set; } = string.Empty;
+
+    [JsonPropertyName("parameters")]
+    public JsonElement Parameters { get; set; }
+}
+
+public sealed class OpenAiChatToolCall
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = "function";
+
+    [JsonPropertyName("function")]
+    public OpenAiChatToolFunction Function { get; set; } = new OpenAiChatToolFunction();
+}
+
+public sealed class OpenAiChatToolFunction
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("arguments")]
+    public string Arguments { get; set; } = string.Empty;
 }
 
 public sealed class OpenAiUsage

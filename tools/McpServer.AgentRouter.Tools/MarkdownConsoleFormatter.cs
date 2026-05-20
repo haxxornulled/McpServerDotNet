@@ -2,12 +2,19 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
-using System.Text.RegularExpressions;
+using AngleSharp.Dom;
+using AngleSharp.Html.Parser;
+using Markdig;
 
 namespace McpServer.AgentRouter.Tools;
 
 internal static class MarkdownConsoleFormatter
 {
+    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .DisableHtml()
+        .Build();
+
     public static IReadOnlyList<string> WrapPlainLines(IReadOnlyList<string> lines, int contentWidth)
     {
         var width = Math.Max(20, contentWidth);
@@ -37,88 +44,24 @@ internal static class MarkdownConsoleFormatter
     {
         var width = Math.Max(20, contentWidth);
         var rendered = new List<string>();
-        if (string.IsNullOrEmpty(text))
+        if (string.IsNullOrWhiteSpace(text))
         {
             rendered.Add(string.Empty);
             return rendered;
         }
 
-        var lines = SplitLines(text);
-        var paragraph = new StringBuilder();
-        var inCodeFence = false;
-        var fenceMarker = '`';
-        var fenceLanguage = string.Empty;
+        var html = Markdown.ToHtml(text, Pipeline);
+        var parser = new HtmlParser();
+        var document = parser.ParseDocument(html);
+        var root = document.Body ?? document.DocumentElement;
 
-        for (var index = 0; index < lines.Count; index++)
+        if (root is null)
         {
-            var line = ConsoleGlyphNormalizer.ReplaceEmojiWithZero(lines[index]);
-            var trimmed = line.TrimStart();
-
-            if (!inCodeFence && TryParseFenceStart(trimmed, out fenceMarker, out fenceLanguage))
-            {
-                FlushParagraph(paragraph, rendered, width);
-                AddBlankLine(rendered);
-
-                rendered.Add(string.IsNullOrWhiteSpace(fenceLanguage)
-                    ? "Code block"
-                    : FormattableString.Invariant($"Code: {fenceLanguage}"));
-
-                inCodeFence = true;
-                continue;
-            }
-
-            if (inCodeFence && TryParseFenceEnd(trimmed, fenceMarker))
-            {
-                inCodeFence = false;
-                AddBlankLine(rendered);
-                continue;
-            }
-
-            if (inCodeFence)
-            {
-                rendered.Add(ConsoleGlyphNormalizer.ReplaceEmojiWithZero(line).Replace("\t", "    "));
-                continue;
-            }
-
-            if (string.IsNullOrWhiteSpace(trimmed))
-            {
-                FlushParagraph(paragraph, rendered, width);
-                AddBlankLine(rendered);
-                continue;
-            }
-
-            if (TryParseHeading(trimmed, out var heading))
-            {
-                FlushParagraph(paragraph, rendered, width);
-                AddBlankLine(rendered);
-                rendered.AddRange(WrapParagraph(heading, width));
-                AddBlankLine(rendered);
-                continue;
-            }
-
-            if (TryParseListItem(trimmed, out var prefix, out var body))
-            {
-                FlushParagraph(paragraph, rendered, width);
-                rendered.AddRange(WrapWithPrefix(prefix, body, width));
-                continue;
-            }
-
-            if (TryParseQuote(trimmed, out var quote))
-            {
-                FlushParagraph(paragraph, rendered, width);
-                rendered.AddRange(WrapWithPrefix("> ", quote, width));
-                continue;
-            }
-
-            if (paragraph.Length > 0)
-            {
-                paragraph.Append(' ');
-            }
-
-            paragraph.Append(trimmed);
+            rendered.Add(string.Empty);
+            return rendered;
         }
 
-        FlushParagraph(paragraph, rendered, width);
+        RenderBlockChildren(root.ChildNodes, rendered, width);
         TrimTrailingBlankLines(rendered);
 
         if (rendered.Count == 0)
@@ -127,6 +70,302 @@ internal static class MarkdownConsoleFormatter
         }
 
         return rendered;
+    }
+
+    private static void RenderBlockChildren(INodeList nodes, List<string> rendered, int width)
+    {
+        for (var index = 0; index < nodes.Length; index++)
+        {
+            if (nodes[index] is not IElement element)
+            {
+                continue;
+            }
+
+            RenderElement(element, rendered, width);
+        }
+    }
+
+    private static void RenderElement(IElement element, List<string> rendered, int width)
+    {
+        var tag = element.TagName.ToUpperInvariant();
+        switch (tag)
+        {
+            case "H1":
+            case "H2":
+            case "H3":
+            case "H4":
+            case "H5":
+            case "H6":
+                FlushHeading(element, rendered, width);
+                break;
+            case "P":
+                FlushParagraph(element, rendered, width);
+                break;
+            case "BLOCKQUOTE":
+                FlushBlockQuote(element, rendered, width);
+                break;
+            case "UL":
+            case "OL":
+                FlushList(element, rendered, width, tag == "OL");
+                break;
+            case "PRE":
+                FlushCodeBlock(element, rendered, width);
+                break;
+            case "HR":
+                AddBlankLine(rendered);
+                rendered.Add("─");
+                AddBlankLine(rendered);
+                break;
+            case "TABLE":
+                FlushTable(element, rendered, width);
+                break;
+            default:
+                RenderBlockChildren(element.ChildNodes, rendered, width);
+                break;
+        }
+    }
+
+    private static void FlushHeading(IElement element, List<string> rendered, int width)
+    {
+        FlushInlineBlock(element, rendered, width, addBlankLines: true);
+    }
+
+    private static void FlushParagraph(IElement element, List<string> rendered, int width)
+    {
+        var text = RenderInlineText(element);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            AddBlankLine(rendered);
+            return;
+        }
+
+        rendered.AddRange(WrapParagraph(text, width));
+        AddBlankLine(rendered);
+    }
+
+    private static void FlushBlockQuote(IElement element, List<string> rendered, int width)
+    {
+        var bodyLines = new List<string>();
+        if (HasBlockChildren(element))
+        {
+            RenderBlockChildren(element.ChildNodes, bodyLines, Math.Max(1, width - 2));
+        }
+        else
+        {
+            bodyLines.AddRange(WrapParagraph(RenderInlineText(element), Math.Max(1, width - 2)));
+        }
+
+        PrefixLines(rendered, bodyLines, "> ");
+        AddBlankLine(rendered);
+    }
+
+    private static void FlushList(IElement element, List<string> rendered, int width, bool ordered)
+    {
+        var itemIndex = 1;
+        foreach (var child in element.Children)
+        {
+            if (!string.Equals(child.TagName, "LI", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var prefix = ordered ? FormattableString.Invariant($"{itemIndex}. ") : "• ";
+            var prefixWidth = ConsoleTextWidth.GetDisplayWidth(prefix);
+            var bodyWidth = Math.Max(1, width - prefixWidth);
+            var itemLines = new List<string>();
+            if (HasBlockChildren(child))
+            {
+                RenderBlockChildren(child.ChildNodes, itemLines, bodyWidth);
+            }
+            else
+            {
+                itemLines.AddRange(WrapParagraph(RenderInlineText(child), bodyWidth));
+            }
+
+            if (itemLines.Count == 0)
+            {
+                itemLines.Add(string.Empty);
+            }
+
+            rendered.Add(prefix + itemLines[0]);
+            for (var index = 1; index < itemLines.Count; index++)
+            {
+                rendered.Add(new string(' ', prefixWidth) + itemLines[index]);
+            }
+
+            itemIndex++;
+        }
+
+        AddBlankLine(rendered);
+    }
+
+    private static void FlushCodeBlock(IElement element, List<string> rendered, int width)
+    {
+        var code = element.QuerySelector("code");
+        var language = ExtractLanguage(code?.ClassName);
+        var content = code?.TextContent ?? element.TextContent;
+
+        AddBlankLine(rendered);
+        rendered.Add(string.IsNullOrWhiteSpace(language)
+            ? "Code block"
+            : FormattableString.Invariant($"Code: {language}"));
+
+        var lines = SplitLines(content);
+        for (var index = 0; index < lines.Count; index++)
+        {
+            var line = ConsoleGlyphNormalizer.ReplaceEmojiWithZero(lines[index]).Replace("\t", "    ", StringComparison.Ordinal);
+            rendered.Add(line);
+        }
+
+        AddBlankLine(rendered);
+    }
+
+    private static void FlushTable(IElement element, List<string> rendered, int width)
+    {
+        var rows = element.QuerySelectorAll("tr");
+        if (rows.Length == 0)
+        {
+            RenderBlockChildren(element.ChildNodes, rendered, width);
+            return;
+        }
+
+        AddBlankLine(rendered);
+        foreach (var row in rows)
+        {
+            var cells = new List<string>();
+            foreach (var cell in row.Children)
+            {
+                var cellText = RenderInlineText(cell);
+                cells.Add(string.IsNullOrWhiteSpace(cellText) ? string.Empty : cellText);
+            }
+
+            rendered.Add(string.Join(" | ", cells));
+        }
+        AddBlankLine(rendered);
+    }
+
+    private static void FlushInlineBlock(IElement element, List<string> rendered, int width, bool addBlankLines)
+    {
+        var text = RenderInlineText(element);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            if (addBlankLines)
+            {
+                AddBlankLine(rendered);
+            }
+
+            return;
+        }
+
+        if (addBlankLines)
+        {
+            AddBlankLine(rendered);
+        }
+
+        rendered.AddRange(WrapParagraph(text, width));
+
+        if (addBlankLines)
+        {
+            AddBlankLine(rendered);
+        }
+    }
+
+    private static void PrefixLines(List<string> rendered, IReadOnlyList<string> lines, string prefix)
+    {
+        var prefixWidth = ConsoleTextWidth.GetDisplayWidth(prefix);
+        for (var index = 0; index < lines.Count; index++)
+        {
+            rendered.Add(index == 0 ? prefix + lines[index] : new string(' ', prefixWidth) + lines[index]);
+        }
+    }
+
+    private static string RenderInlineText(IElement element)
+    {
+        var builder = new StringBuilder();
+        RenderInlineNodes(element.ChildNodes, builder);
+        return NormalizeInlineText(builder.ToString());
+    }
+
+    private static void RenderInlineNodes(INodeList nodes, StringBuilder builder)
+    {
+        for (var index = 0; index < nodes.Length; index++)
+        {
+            var node = nodes[index];
+            if (node is IElement element)
+            {
+                RenderInlineElement(element, builder);
+                continue;
+            }
+
+            var text = node.TextContent;
+            if (!string.IsNullOrEmpty(text))
+            {
+                builder.Append(text);
+            }
+        }
+    }
+
+    private static void RenderInlineElement(IElement element, StringBuilder builder)
+    {
+        var tag = element.TagName.ToUpperInvariant();
+        switch (tag)
+        {
+            case "A":
+            {
+                var label = new StringBuilder();
+                RenderInlineNodes(element.ChildNodes, label);
+                var href = element.GetAttribute("href");
+                if (!string.IsNullOrWhiteSpace(href))
+                {
+                    builder.Append(label);
+                    builder.Append(" (");
+                    builder.Append(href);
+                    builder.Append(')');
+                }
+                else
+                {
+                    builder.Append(label);
+                }
+
+                break;
+            }
+            case "CODE":
+                builder.Append(element.TextContent);
+                break;
+            case "BR":
+                builder.Append(' ');
+                break;
+            default:
+                RenderInlineNodes(element.ChildNodes, builder);
+                break;
+        }
+    }
+
+    private static string NormalizeInlineText(string text)
+    {
+        var normalized = ConsoleGlyphNormalizer.ReplaceEmojiWithZero(text);
+        var builder = new StringBuilder(normalized.Length);
+        var inWhitespace = false;
+
+        for (var index = 0; index < normalized.Length; index++)
+        {
+            var character = normalized[index];
+            if (char.IsWhiteSpace(character))
+            {
+                inWhitespace = true;
+                continue;
+            }
+
+            if (inWhitespace && builder.Length > 0)
+            {
+                builder.Append(' ');
+            }
+
+            builder.Append(character);
+            inWhitespace = false;
+        }
+
+        return builder.ToString().Trim();
     }
 
     private static List<string> SplitLines(string text)
@@ -156,17 +395,6 @@ internal static class MarkdownConsoleFormatter
         return lines;
     }
 
-    private static void FlushParagraph(StringBuilder paragraph, List<string> rendered, int width)
-    {
-        if (paragraph.Length == 0)
-        {
-            return;
-        }
-
-        rendered.AddRange(WrapParagraph(paragraph.ToString(), width));
-        paragraph.Clear();
-    }
-
     private static void AddBlankLine(ICollection<string> rendered)
     {
         if (rendered is List<string> list)
@@ -190,132 +418,60 @@ internal static class MarkdownConsoleFormatter
         }
     }
 
-    private static bool TryParseFenceStart(string line, out char fenceMarker, out string fenceLanguage)
+    private static string ExtractLanguage(string? className)
     {
-        fenceMarker = default;
-        fenceLanguage = string.Empty;
-
-        if (line.Length < 3)
+        if (string.IsNullOrWhiteSpace(className))
         {
-            return false;
+            return string.Empty;
         }
 
-        if (line.StartsWith("```", StringComparison.Ordinal))
+        var classes = className.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        for (var index = 0; index < classes.Length; index++)
         {
-            fenceMarker = '`';
-            fenceLanguage = line[3..].Trim();
-            return true;
+            var css = classes[index];
+            if (css.StartsWith("language-", StringComparison.OrdinalIgnoreCase))
+            {
+                return css["language-".Length..];
+            }
         }
 
-        if (line.StartsWith("~~~", StringComparison.Ordinal))
+        return string.Empty;
+    }
+
+    private static bool HasBlockChildren(IElement element)
+    {
+        foreach (var child in element.ChildNodes)
         {
-            fenceMarker = '~';
-            fenceLanguage = line[3..].Trim();
-            return true;
+            if (child is IElement childElement && IsBlockTag(childElement.TagName))
+            {
+                return true;
+            }
         }
 
         return false;
     }
 
-    private static bool TryParseFenceEnd(string line, char fenceMarker)
+    private static bool IsBlockTag(string tagName)
     {
-        if (fenceMarker == '`')
-        {
-            return line.StartsWith("```", StringComparison.Ordinal);
-        }
-
-        if (fenceMarker == '~')
-        {
-            return line.StartsWith("~~~", StringComparison.Ordinal);
-        }
-
-        return false;
-    }
-
-    private static bool TryParseHeading(string line, out string heading)
-    {
-        heading = string.Empty;
-        if (!line.StartsWith("#", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        var index = 0;
-        while (index < line.Length && line[index] == '#')
-        {
-            index++;
-        }
-
-        if (index == 0 || index >= line.Length)
-        {
-            return false;
-        }
-
-        if (line[index] != ' ')
-        {
-            return false;
-        }
-
-        heading = line[(index + 1)..].Trim();
-        return heading.Length > 0;
-    }
-
-    private static bool TryParseListItem(string line, out string prefix, out string body)
-    {
-        prefix = string.Empty;
-        body = string.Empty;
-
-        if (line.Length < 2)
-        {
-            return false;
-        }
-
-        if (line[0] is '-' or '*' or '+'
-            && line[1] == ' ')
-        {
-            prefix = "• ";
-            body = line[2..].Trim();
-            return body.Length > 0;
-        }
-
-        var index = 0;
-        while (index < line.Length && char.IsDigit(line[index]))
-        {
-            index++;
-        }
-
-        if (index == 0 || index + 1 >= line.Length)
-        {
-            return false;
-        }
-
-        if (line[index] is not '.' and not ')'
-            || line[index + 1] != ' ')
-        {
-            return false;
-        }
-
-        prefix = line[..(index + 2)];
-        body = line[(index + 2)..].Trim();
-        return body.Length > 0;
-    }
-
-    private static bool TryParseQuote(string line, out string quote)
-    {
-        quote = string.Empty;
-        if (!line.StartsWith(">", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        quote = line[1..].TrimStart();
-        return quote.Length > 0;
+        return tagName.Equals("P", StringComparison.OrdinalIgnoreCase)
+            || tagName.Equals("BLOCKQUOTE", StringComparison.OrdinalIgnoreCase)
+            || tagName.Equals("UL", StringComparison.OrdinalIgnoreCase)
+            || tagName.Equals("OL", StringComparison.OrdinalIgnoreCase)
+            || tagName.Equals("PRE", StringComparison.OrdinalIgnoreCase)
+            || tagName.Equals("TABLE", StringComparison.OrdinalIgnoreCase)
+            || tagName.Equals("HR", StringComparison.OrdinalIgnoreCase)
+            || tagName.Equals("H1", StringComparison.OrdinalIgnoreCase)
+            || tagName.Equals("H2", StringComparison.OrdinalIgnoreCase)
+            || tagName.Equals("H3", StringComparison.OrdinalIgnoreCase)
+            || tagName.Equals("H4", StringComparison.OrdinalIgnoreCase)
+            || tagName.Equals("H5", StringComparison.OrdinalIgnoreCase)
+            || tagName.Equals("H6", StringComparison.OrdinalIgnoreCase);
     }
 
     private static IReadOnlyList<string> WrapParagraph(string text, int width)
     {
         var rendered = new List<string>();
-        text = ConsoleGlyphNormalizer.ReplaceEmojiWithZero(NormalizeInlineMarkdown(text));
+        text = NormalizeInlineText(text);
         if (string.IsNullOrWhiteSpace(text))
         {
             rendered.Add(string.Empty);
@@ -381,27 +537,6 @@ internal static class MarkdownConsoleFormatter
         return rendered;
     }
 
-    private static IReadOnlyList<string> WrapWithPrefix(string prefix, string body, int width)
-    {
-        var rendered = new List<string>();
-        body = ConsoleGlyphNormalizer.ReplaceEmojiWithZero(NormalizeInlineMarkdown(body));
-        var prefixWidth = ConsoleTextWidth.GetDisplayWidth(prefix);
-        var bodyWidth = Math.Max(1, width - prefixWidth);
-        var wrapped = WrapParagraph(body, bodyWidth);
-
-        for (var index = 0; index < wrapped.Count; index++)
-        {
-            rendered.Add(index == 0 ? prefix + wrapped[index] : new string(' ', prefixWidth) + wrapped[index]);
-        }
-
-        if (rendered.Count == 0)
-        {
-            rendered.Add(prefix.TrimEnd());
-        }
-
-        return rendered;
-    }
-
     private static IReadOnlyList<string> SplitByWidth(string text, int width)
     {
         var chunks = new List<string>();
@@ -435,17 +570,5 @@ internal static class MarkdownConsoleFormatter
         }
 
         return chunks;
-    }
-
-    private static string NormalizeInlineMarkdown(string text)
-    {
-        var normalized = text;
-        normalized = Regex.Replace(normalized, @"\*\*(.+?)\*\*", "$1");
-        normalized = Regex.Replace(normalized, @"__(.+?)__", "$1");
-        normalized = Regex.Replace(normalized, @"(?<!\w)\*(.+?)\*(?!\w)", "$1");
-        normalized = Regex.Replace(normalized, @"(?<!\w)_(.+?)_(?!\w)", "$1");
-        normalized = Regex.Replace(normalized, @"`([^`]+)`", "$1");
-        normalized = Regex.Replace(normalized, @"\[(.+?)\]\((.+?)\)", "$1 ($2)");
-        return normalized;
     }
 }

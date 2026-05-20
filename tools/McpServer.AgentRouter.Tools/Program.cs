@@ -67,19 +67,20 @@ internal static class AgentRouterToolProgram
         }
 
         var command = args[0].Trim().ToLowerInvariant();
-        var options = CommandLineOptions.Parse(SliceArguments(args, 1));
-        CliOutput.Configure(options.GetOutputMode());
 
         try
         {
             return command switch
             {
-                "chat" => await RunChatAsync(options, cancellationToken).ConfigureAwait(false),
-                "install-local-clients" => await RunInstallLocalClientsAsync(options, cancellationToken).ConfigureAwait(false),
-                "verify" => await RunVerifyAsync(options, cancellationToken).ConfigureAwait(false),
-                "stress" => await RunStressAsync(options, cancellationToken).ConfigureAwait(false),
-                "smoke" => await RunSmokeAsync(options, cancellationToken).ConfigureAwait(false),
-                "provider-unavailable" => await RunProviderUnavailableAsync(options, cancellationToken).ConfigureAwait(false),
+                "chat" => await RunChatAsync(ParseOptions(args, 1), cancellationToken).ConfigureAwait(false),
+                "ollama-ls" => await RunOllamaListAsync(ParseOptions(args, 1), cancellationToken).ConfigureAwait(false),
+                "ollama" => await RunOllamaAsync(args, cancellationToken).ConfigureAwait(false),
+                "chat-status" => await RunChatStatusAsync(ParseOptions(args, 1), cancellationToken).ConfigureAwait(false),
+                "install-local-clients" => await RunInstallLocalClientsAsync(ParseOptions(args, 1), cancellationToken).ConfigureAwait(false),
+                "verify" => await RunVerifyAsync(ParseOptions(args, 1), cancellationToken).ConfigureAwait(false),
+                "stress" => await RunStressAsync(ParseOptions(args, 1), cancellationToken).ConfigureAwait(false),
+                "smoke" => await RunSmokeAsync(ParseOptions(args, 1), cancellationToken).ConfigureAwait(false),
+                "provider-unavailable" => await RunProviderUnavailableAsync(ParseOptions(args, 1), cancellationToken).ConfigureAwait(false),
                 _ => UnknownCommand(command)
             };
         }
@@ -90,8 +91,19 @@ internal static class AgentRouterToolProgram
         }
     }
 
+    internal static void WarnIfChatJsonOutput(string command, TextWriter errorWriter)
+    {
+        if (!string.Equals(command, "chat", StringComparison.OrdinalIgnoreCase) || !CliOutput.IsJson)
+        {
+            return;
+        }
+
+        errorWriter.WriteLine("Chat is in JSON output mode. Stdout will be machine-readable JSON.");
+    }
+
     private static async Task<int> RunStressAsync(CommandLineOptions options, CancellationToken cancellationToken)
     {
+        CliOutput.Configure(options.GetOutputMode());
         var settings = StressSettings.FromOptions(options);
         using var httpClient = HttpClientFactory.Create(settings.TimeoutSeconds);
         var runner = new StressRunner(httpClient, settings, new ConsoleStressReporter());
@@ -114,6 +126,8 @@ internal static class AgentRouterToolProgram
 
     private static async Task<int> RunChatAsync(CommandLineOptions options, CancellationToken cancellationToken)
     {
+        CliOutput.Configure(options.GetOutputMode());
+        WarnIfChatJsonOutput("chat", Console.Error);
         var settings = ChatConsoleSettings.FromOptions(options);
         using var httpClient = HttpClientFactory.Create(settings.TimeoutSeconds);
         var runner = new ChatConsoleRunner(
@@ -151,8 +165,93 @@ internal static class AgentRouterToolProgram
         return result.ExitCode;
     }
 
+    private static async Task<int> RunOllamaAsync(string[] args, CancellationToken cancellationToken)
+    {
+        if (args.Length < 2 || !string.Equals(args[1], "ls", StringComparison.OrdinalIgnoreCase))
+        {
+            if (args.Length >= 2 && string.Equals(args[1], "bench", StringComparison.OrdinalIgnoreCase))
+            {
+                return await RunOllamaBenchAsync(ParseOptions(args, 2), cancellationToken).ConfigureAwait(false);
+            }
+
+            HelpWriter.WriteRootHelp();
+            return 2;
+        }
+
+        var options = ParseOptions(args, 2);
+        return await RunOllamaListAsync(options, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<int> RunOllamaBenchAsync(CommandLineOptions options, CancellationToken cancellationToken)
+    {
+        CliOutput.Configure(options.GetOutputMode());
+        var settings = OllamaBenchSettings.FromOptions(options);
+        using var httpClient = HttpClientFactory.Create(settings.TimeoutSeconds);
+        var runner = new OllamaBenchRunner(settings, httpClient, Console.Out, Console.Error);
+        var result = await runner.RunAsync(cancellationToken).ConfigureAwait(false);
+
+        if (CliOutput.IsJson)
+        {
+            WriteJson(new
+            {
+                command = "ollama bench",
+                status = result.ServerReachable ? "completed" : "failed",
+                baseUrl = result.BaseUrl,
+                serverReachable = result.ServerReachable,
+                message = result.Message,
+                reportDirectory = string.IsNullOrWhiteSpace(settings.ReportDirectory) ? null : Path.GetFullPath(settings.ReportDirectory),
+                modelCount = result.Models.Count,
+                caseCount = result.Cases.Count,
+                models = result.Models,
+                cases = result.Cases
+            });
+        }
+
+        return result.ServerReachable ? 0 : 1;
+    }
+
+    private static async Task<int> RunOllamaListAsync(CommandLineOptions options, CancellationToken cancellationToken)
+    {
+        CliOutput.Configure(options.GetOutputMode());
+        var settings = OllamaListSettings.FromOptions(options);
+        using var httpClient = HttpClientFactory.Create(settings.TimeoutSeconds);
+        var runner = new OllamaListRunner(settings, httpClient, Console.Out, Console.Error);
+        var result = await runner.RunAsync(cancellationToken).ConfigureAwait(false);
+
+        if (CliOutput.IsJson)
+        {
+            WriteJson(new
+            {
+                command = "ollama ls",
+                status = result.ServerReachable ? "completed" : "failed",
+                baseUrl = result.BaseUrl,
+                serverReachable = result.ServerReachable,
+                message = result.Message,
+                modelCount = result.Models.Count,
+                models = result.Models
+            });
+        }
+
+        return result.ServerReachable ? 0 : 1;
+    }
+
+    private static async Task<int> RunChatStatusAsync(CommandLineOptions options, CancellationToken cancellationToken)
+    {
+        CliOutput.Configure(options.GetOutputMode());
+        var statusLockPath = options.GetString("status-lock", string.Empty);
+        if (string.IsNullOrWhiteSpace(statusLockPath))
+        {
+            ConsoleWriter.WriteError("Chat status requires --status-lock <path>.");
+            return 2;
+        }
+
+        await ChatStatusWindow.RunAsync(Path.GetFullPath(statusLockPath), cancellationToken).ConfigureAwait(false);
+        return 0;
+    }
+
     private static async Task<int> RunVerifyAsync(CommandLineOptions options, CancellationToken cancellationToken)
     {
+        CliOutput.Configure(options.GetOutputMode());
         var settings = RepositoryVerificationSettings.FromOptions(options);
         var runner = new RepositoryVerificationRunner(settings);
         var exitCode = await runner.RunAsync(cancellationToken).ConfigureAwait(false);
@@ -177,6 +276,7 @@ internal static class AgentRouterToolProgram
 
     private static async Task<int> RunInstallLocalClientsAsync(CommandLineOptions options, CancellationToken cancellationToken)
     {
+        CliOutput.Configure(options.GetOutputMode());
         var settings = LocalMcpClientConfigSettings.FromOptions(options);
         var runner = new LocalMcpClientConfigRunner(settings);
         var exitCode = await runner.RunAsync(cancellationToken).ConfigureAwait(false);
@@ -204,6 +304,7 @@ internal static class AgentRouterToolProgram
 
     private static async Task<int> RunSmokeAsync(CommandLineOptions options, CancellationToken cancellationToken)
     {
+        CliOutput.Configure(options.GetOutputMode());
         var settings = StressSettings.FromOptions(options).AsSmokeProfile();
         using var httpClient = HttpClientFactory.Create(settings.TimeoutSeconds);
         var runner = new StressRunner(httpClient, settings, new ConsoleStressReporter());
@@ -226,6 +327,7 @@ internal static class AgentRouterToolProgram
 
     private static async Task<int> RunProviderUnavailableAsync(CommandLineOptions options, CancellationToken cancellationToken)
     {
+        CliOutput.Configure(options.GetOutputMode());
         var settings = StressSettings.FromOptions(options).AsProviderUnavailableProfile();
         var strict = options.HasFlag("strict");
         using var httpClient = HttpClientFactory.Create(settings.TimeoutSeconds);
@@ -277,6 +379,11 @@ internal static class AgentRouterToolProgram
         return false;
     }
 
+    private static CommandLineOptions ParseOptions(string[] args, int startIndex)
+    {
+        return CommandLineOptions.Parse(SliceArguments(args, startIndex));
+    }
+
     private static string[] SliceArguments(string[] args, int startIndex)
     {
         if (startIndex <= 0)
@@ -300,5 +407,131 @@ internal static class AgentRouterToolProgram
         {
             WriteIndented = true
         }));
+    }
+}
+
+internal static class ChatStatusWindow
+{
+    private static readonly string[] SpinnerFrames = ["|", "/", "-", "\\"];
+
+    public static async Task RunAsync(string statePath, CancellationToken cancellationToken)
+    {
+        if (Console.IsOutputRedirected)
+        {
+            return;
+        }
+
+        try
+        {
+            Console.Title = "McpServer Chat Status";
+        }
+        catch
+        {
+        }
+
+        var frameIndex = 0;
+        var lastRenderedState = string.Empty;
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            if (!File.Exists(statePath))
+            {
+                break;
+            }
+
+            var state = ReadState(statePath);
+            if (!string.Equals(state, lastRenderedState, StringComparison.Ordinal))
+            {
+                RenderStatus(state);
+                lastRenderedState = state;
+                frameIndex = 0;
+            }
+
+            if (string.IsNullOrWhiteSpace(state))
+            {
+                await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            RenderSpinner(state, SpinnerFrames[frameIndex]);
+            frameIndex = (frameIndex + 1) % SpinnerFrames.Length;
+
+            await Task.Delay(120, cancellationToken).ConfigureAwait(false);
+        }
+
+        ClearLine();
+    }
+
+    private static string ReadState(string statePath)
+    {
+        try
+        {
+            return File.Exists(statePath) ? File.ReadAllText(statePath) : string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static void RenderStatus(string? state)
+    {
+        var text = "Status: " + (string.IsNullOrWhiteSpace(state) ? "Ready." : state);
+        WriteLine(text);
+    }
+
+    private static void RenderSpinner(string state, string frame)
+    {
+        var text = frame + " " + state;
+        WriteLine(text);
+    }
+
+    private static void ClearLine()
+    {
+        try
+        {
+            if (Console.IsOutputRedirected)
+            {
+                return;
+            }
+
+            Console.Write('\r');
+            Console.Write(new string(' ', Math.Max(0, Console.WindowWidth - 1)));
+            Console.Write('\r');
+        }
+        catch
+        {
+        }
+    }
+
+    private static void WriteLine(string text)
+    {
+        try
+        {
+            ClearLine();
+            Console.Write('\r');
+            Console.Write(text);
+            PadToWidth(text);
+            Console.Out.Flush();
+        }
+        catch
+        {
+        }
+    }
+
+    private static void PadToWidth(string text)
+    {
+        try
+        {
+            var width = Console.WindowWidth;
+            var padding = Math.Max(0, width - text.Length - 1);
+            if (padding > 0)
+            {
+                Console.Write(new string(' ', padding));
+            }
+        }
+        catch
+        {
+        }
     }
 }

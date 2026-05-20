@@ -108,6 +108,60 @@ public sealed class OllamaChatModelClientTests
             Assert.Contains("\"stream\":true", body, StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public async Task CompleteAsync_Should_Send_Tools_And_Parse_Tool_Calls()
+    {
+        var handler = new CapturingHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """
+                {"message":{"role":"assistant","content":"","tool_calls":[{"id":"call-1","type":"function","function":{"name":"web.search","arguments":"{\"query\":\"AgentRouter\"}"}}]},"done":true,"done_reason":"stop","prompt_eval_count":5,"eval_count":3}
+                """,
+                Encoding.UTF8,
+                "application/json")
+        });
+
+        var sut = CreateSut(handler);
+        var request = new ModelInvocationRequest(
+            modelProfileName: "local-code",
+            messages: new[] { new ChatTurnMessage("user", "Search for AgentRouter") },
+            temperature: null,
+            maxOutputTokens: null,
+            tools: new[]
+            {
+                new ChatToolDefinition(
+                    "web.search",
+                    "Searches the web for a query and returns ranked results.",
+                    JsonSerializer.SerializeToElement(new
+                    {
+                        type = "object",
+                        additionalProperties = false,
+                        properties = new
+                        {
+                            query = new { type = "string" }
+                        },
+                        required = new[] { "query" }
+                    }))
+            });
+
+        var result = await sut.CompleteAsync(request, CreateProfile(), CancellationToken.None);
+
+        Assert.True(result.IsSucc, result.Match(
+            Succ: _ => string.Empty,
+            Fail: error => error.Message));
+
+        var turn = result.Match(
+            Succ: value => value,
+            Fail: _ => throw new InvalidOperationException("Expected completion success."));
+
+        Assert.Single(turn.ToolCalls!);
+        Assert.Equal("call-1", turn.ToolCalls![0].Id);
+        Assert.Equal("web.search", turn.ToolCalls![0].Name);
+        Assert.Equal(HttpMethod.Post, handler.RequestMethod);
+        Assert.Contains("\"tools\"", handler.RequestBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("web.search", handler.RequestBody, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static OllamaChatModelClient CreateSut(HttpMessageHandler handler)
     {
         var httpClient = new HttpClient(handler, disposeHandler: false);

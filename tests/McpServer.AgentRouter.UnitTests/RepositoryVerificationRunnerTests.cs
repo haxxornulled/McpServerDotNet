@@ -77,6 +77,24 @@ public sealed class RepositoryVerificationRunnerTests
         }
     }
 
+    [Fact]
+    public void Chat_Command_In_Json_Mode_Should_Write_Notice_To_Stderr()
+    {
+        using var error = new StringWriter();
+        CliOutput.Configure("json");
+
+        try
+        {
+            AgentRouterToolProgram.WarnIfChatJsonOutput("chat", error);
+
+            Assert.Contains("Chat is in JSON output mode", error.ToString());
+        }
+        finally
+        {
+            CliOutput.Configure("text");
+        }
+    }
+
     private sealed class BlockingProcessRunner : IProcessRunner
     {
         public async Task<int> RunAsync(string fileName, IReadOnlyCollection<string> arguments, string workingDirectory, CancellationToken cancellationToken)

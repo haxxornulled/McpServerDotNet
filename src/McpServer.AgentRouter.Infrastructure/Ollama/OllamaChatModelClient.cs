@@ -89,14 +89,15 @@ public sealed class OllamaChatModelClient : IChatModelClient
 
             LogCompletedRequest(profile, stopwatch.ElapsedMilliseconds);
 
-            return Fin<ModelTurnResult>.Succ(new ModelTurnResult(
+        return Fin<ModelTurnResult>.Succ(new ModelTurnResult(
                 provider: ProviderName,
                 model: profile.Model,
                 content: parsedResponse.Content,
                 finishReason: parsedResponse.FinishReason,
                 promptTokens: parsedResponse.PromptTokens,
                 completionTokens: parsedResponse.CompletionTokens,
-                elapsedMilliseconds: stopwatch.ElapsedMilliseconds));
+                elapsedMilliseconds: stopwatch.ElapsedMilliseconds,
+                toolCalls: parsedResponse.ToolCalls));
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -238,7 +239,20 @@ public sealed class OllamaChatModelClient : IChatModelClient
         var messages = request.Messages.Select(static message => new
         {
             role = message.Role,
-            content = message.Content
+            content = message.Content,
+            tool_call_id = message.ToolCallId,
+            tool_calls = message.ToolCalls is null
+                ? null
+                : message.ToolCalls.Select(static toolCall => new
+                {
+                    id = toolCall.Id,
+                    type = "function",
+                    function = new
+                    {
+                        name = toolCall.Name,
+                        arguments = toolCall.Arguments.GetRawText()
+                    }
+                }).ToArray()
         }).ToArray();
 
         var options = new
@@ -248,12 +262,26 @@ public sealed class OllamaChatModelClient : IChatModelClient
             num_predict = Math.Clamp(request.MaxOutputTokens ?? profile.MaxOutputTokens, 1, profile.MaxOutputTokens)
         };
 
+        var tools = request.Tools is null || request.Tools.Count == 0
+            ? null
+            : request.Tools.Select(static tool => new
+            {
+                type = "function",
+                function = new
+                {
+                    name = tool.Name,
+                    description = tool.Description,
+                    parameters = tool.InputSchema
+                }
+            }).ToArray();
+
         var payload = new
         {
             model = profile.Model,
             stream,
             messages,
-            options
+            options,
+            tools
         };
 
         var json = JsonSerializer.Serialize(payload, JsonOptions);
@@ -296,12 +324,14 @@ public sealed class OllamaChatModelClient : IChatModelClient
         var promptTokens = ReadInt32(root, "prompt_eval_count");
         var completionTokens = ReadInt32(root, "eval_count");
         var finishReason = ReadString(root, "done_reason") ?? "stop";
+        var toolCalls = ReadToolCalls(root);
 
         return Fin<OllamaParsedResponse>.Succ(new OllamaParsedResponse(
             content,
             finishReason,
             promptTokens,
-            completionTokens));
+            completionTokens,
+            toolCalls));
     }
 
     private static int ReadInt32(JsonElement root, string propertyName)
@@ -325,6 +355,60 @@ public sealed class OllamaChatModelClient : IChatModelClient
         }
 
         return null;
+    }
+
+    private static IReadOnlyList<ChatToolCall>? ReadToolCalls(JsonElement root)
+    {
+        if (!root.TryGetProperty("message", out var message) ||
+            message.ValueKind != JsonValueKind.Object ||
+            !message.TryGetProperty("tool_calls", out var toolCallsElement) ||
+            toolCallsElement.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var toolCalls = new List<ChatToolCall>();
+        foreach (var toolCallElement in toolCallsElement.EnumerateArray())
+        {
+            if (toolCallElement.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var id = ReadString(toolCallElement, "id") ?? string.Empty;
+            var type = ReadString(toolCallElement, "type");
+            var function = toolCallElement.TryGetProperty("function", out var functionElement) &&
+                functionElement.ValueKind == JsonValueKind.Object
+                ? functionElement
+                : default;
+
+            var name = function.ValueKind == JsonValueKind.Object
+                ? ReadString(function, "name") ?? string.Empty
+                : string.Empty;
+
+            var argumentsText = function.ValueKind == JsonValueKind.Object
+                ? ReadString(function, "arguments") ?? "{}"
+                : "{}";
+
+            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            JsonElement arguments;
+            try
+            {
+                arguments = JsonDocument.Parse(argumentsText).RootElement.Clone();
+            }
+            catch (JsonException)
+            {
+                arguments = JsonDocument.Parse("{}").RootElement.Clone();
+            }
+
+            toolCalls.Add(new ChatToolCall(id, name, arguments));
+        }
+
+        return toolCalls.Count == 0 ? null : toolCalls;
     }
 
     private static bool ReadBoolean(JsonElement root, string propertyName)
@@ -446,12 +530,14 @@ public sealed class OllamaChatModelClient : IChatModelClient
             string content,
             string finishReason,
             int promptTokens,
-            int completionTokens)
+            int completionTokens,
+            IReadOnlyList<ChatToolCall>? toolCalls)
         {
             Content = content;
             FinishReason = finishReason;
             PromptTokens = promptTokens;
             CompletionTokens = completionTokens;
+            ToolCalls = toolCalls;
         }
 
         public string Content { get; }
@@ -461,6 +547,8 @@ public sealed class OllamaChatModelClient : IChatModelClient
         public int PromptTokens { get; }
 
         public int CompletionTokens { get; }
+
+        public IReadOnlyList<ChatToolCall>? ToolCalls { get; }
     }
 
     private sealed class OllamaStreamChunk

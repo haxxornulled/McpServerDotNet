@@ -33,6 +33,8 @@ internal sealed class ChatConsoleSettings
 
     public bool StreamRequested { get; init; } = true;
 
+    public bool EnableToolCalling { get; init; } = true;
+
     public bool Interactive { get; init; }
 
     public string? TranscriptPath { get; init; }
@@ -61,6 +63,7 @@ internal sealed class ChatConsoleSettings
             MaxTokens = options.GetNullableInt("max-tokens"),
             TimeoutSeconds = options.GetInt("timeout-seconds", 120),
             StreamRequested = options.GetBool("stream", true),
+            EnableToolCalling = options.GetBool("tools", true),
             Interactive = options.GetBool("interactive", false),
             TranscriptPath = options.GetString("transcript", string.Empty),
             SessionName = options.GetString("session-name", "chat")
@@ -173,6 +176,53 @@ internal sealed class ChatConsoleTurnResult
     public long ElapsedMilliseconds { get; }
 }
 
+internal sealed class ChatConsoleModelReply
+{
+    public ChatConsoleModelReply(
+        string content,
+        string finishReason,
+        int promptTokens,
+        int completionTokens,
+        long elapsedMilliseconds,
+        IReadOnlyList<ChatConsoleToolCall>? toolCalls)
+    {
+        Content = content;
+        FinishReason = string.IsNullOrWhiteSpace(finishReason) ? "stop" : finishReason;
+        PromptTokens = promptTokens;
+        CompletionTokens = completionTokens;
+        ElapsedMilliseconds = elapsedMilliseconds;
+        ToolCalls = toolCalls;
+    }
+
+    public string Content { get; }
+
+    public string FinishReason { get; }
+
+    public int PromptTokens { get; }
+
+    public int CompletionTokens { get; }
+
+    public long ElapsedMilliseconds { get; }
+
+    public IReadOnlyList<ChatConsoleToolCall>? ToolCalls { get; }
+}
+
+internal sealed class ChatConsoleToolCall
+{
+    public ChatConsoleToolCall(string id, string name, JsonNode? arguments)
+    {
+        Id = string.IsNullOrWhiteSpace(id) ? throw new ArgumentException("Tool call id is required.", nameof(id)) : id;
+        Name = string.IsNullOrWhiteSpace(name) ? throw new ArgumentException("Tool name is required.", nameof(name)) : name;
+        Arguments = arguments;
+    }
+
+    public string Id { get; }
+
+    public string Name { get; }
+
+    public JsonNode? Arguments { get; }
+}
+
 internal sealed class ChatConsoleTranscript
 {
     public string SessionName { get; init; } = string.Empty;
@@ -215,8 +265,8 @@ internal sealed class ChatConsoleTranscriptTurn
 
 internal sealed class ChatConsoleRunner
 {
-    private const int FrameWidth = 78;
-    private const int FrameContentWidth = FrameWidth - 4;
+    private const int MinFrameWidth = 78;
+    private const int MaxFrameWidth = 120;
 
     private readonly ChatConsoleSettings _settings;
     private readonly HttpClient _httpClient;
@@ -224,6 +274,10 @@ internal sealed class ChatConsoleRunner
     private readonly TextWriter _output;
     private readonly TextWriter _error;
     private readonly bool _inputRedirected;
+    private readonly ChatConsoleInputController _inputController;
+    private readonly IChatConsoleStatusIndicatorFactory _statusIndicatorFactory;
+    private readonly WebSearchConsoleToolClient _webSearchToolClient;
+    private IReadOnlyList<ChatConsoleToolDefinition>? _toolDefinitions;
     private readonly JsonSerializerOptions _jsonOptions = JsonOptions.CreateIndented();
 
     public ChatConsoleRunner(
@@ -232,7 +286,9 @@ internal sealed class ChatConsoleRunner
         TextReader input,
         TextWriter output,
         TextWriter error,
-        bool inputRedirected)
+        bool inputRedirected,
+        IClipboardTextProvider? clipboardTextProvider = null,
+        IChatConsoleStatusIndicatorFactory? statusIndicatorFactory = null)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
@@ -240,6 +296,9 @@ internal sealed class ChatConsoleRunner
         _output = output ?? throw new ArgumentNullException(nameof(output));
         _error = error ?? throw new ArgumentNullException(nameof(error));
         _inputRedirected = inputRedirected;
+        _inputController = new ChatConsoleInputController(input, clipboardTextProvider ?? new PowerShellClipboardTextProvider());
+        _statusIndicatorFactory = statusIndicatorFactory ?? new TerminalChatConsoleStatusIndicatorFactory(output);
+        _webSearchToolClient = new WebSearchConsoleToolClient(httpClient, settings.RouterBaseUrl);
     }
 
     public async Task<ChatConsoleSessionResult> RunAsync(CancellationToken cancellationToken)
@@ -319,23 +378,34 @@ internal sealed class ChatConsoleRunner
             _output.Write("You> ");
             _output.Flush();
 
-            var line = _input.ReadLine();
-            if (line is null)
+            var submission = await _inputController.ReadNextSubmissionAsync(cancellationToken).ConfigureAwait(false);
+            if (submission.Kind == ChatConsoleInputKind.EndOfStream)
             {
                 break;
             }
 
-            if (IsExitCommand(line))
+            if (submission.Kind == ChatConsoleInputKind.Exit)
             {
                 break;
             }
 
-            if (string.IsNullOrWhiteSpace(line))
+            if (!string.IsNullOrWhiteSpace(submission.Notice) && !CliOutput.IsJson)
+            {
+                _output.WriteLine(submission.Notice);
+            }
+
+            if (submission.Kind == ChatConsoleInputKind.ToolCommand)
+            {
+                await RunToolCommandAsync(conversation, submission, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(submission.Prompt))
             {
                 continue;
             }
 
-            await RunOneTurnAsync(conversation, turns, line, streamed, cancellationToken).ConfigureAwait(false);
+            await RunOneTurnAsync(conversation, turns, submission.Prompt, streamed, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -360,6 +430,47 @@ internal sealed class ChatConsoleRunner
         }
     }
 
+    private async Task RunToolCommandAsync(
+        List<ChatMessage> conversation,
+        ChatConsoleInputSubmission submission,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(submission.ToolName, "web.search", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(submission.Prompt))
+        {
+            return;
+        }
+
+        try
+        {
+            await using var status = CreateStatusIndicator();
+            var searchResult = await _webSearchToolClient
+                .SearchAsync(submission.Prompt, maxResults: 5, cancellationToken)
+                .ConfigureAwait(false);
+
+            var summaryMarkdown = BuildWebSearchMarkdown(searchResult);
+            if (!CliOutput.IsJson)
+            {
+                WriteMarkdownBlock("Web Search", summaryMarkdown);
+                _output.WriteLine("Search results added to context for the next turn.");
+                _output.WriteLine();
+            }
+
+            conversation.Add(new ChatMessage("system", BuildSearchContext(searchResult)));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException)
+        {
+            if (!CliOutput.IsJson)
+            {
+                _error.WriteLine(ex.Message);
+            }
+        }
+    }
+
     private async Task<ChatConsoleTurnResult?> ExecuteTurnAsync(
         List<ChatMessage> conversation,
         string prompt,
@@ -376,18 +487,56 @@ internal sealed class ChatConsoleRunner
 
         try
         {
-            var result = streamed
-                ? await ExecuteStreamingTurnAsync(conversation, prompt, cancellationToken).ConfigureAwait(false)
-                : await ExecuteNonStreamingTurnAsync(conversation, prompt, cancellationToken).ConfigureAwait(false);
+            await using var status = CreateStatusIndicator();
 
-            if (result is null)
+            if (_settings.EnableToolCalling)
+            {
+                var result = await ExecuteToolAwareTurnAsync(conversation, prompt, streamed, status, cancellationToken).ConfigureAwait(false);
+                if (result is null)
+                {
+                    conversation.RemoveAt(conversation.Count - 1);
+                    return null;
+                }
+
+                conversation.Add(new ChatMessage("assistant", result.Response));
+                return result;
+            }
+
+            if (streamed)
+            {
+                var streamingResult = await ExecuteStreamingTurnAsync(conversation, prompt, null, status, cancellationToken).ConfigureAwait(false);
+                if (streamingResult is null)
+                {
+                    conversation.RemoveAt(conversation.Count - 1);
+                    return null;
+                }
+
+                conversation.Add(new ChatMessage("assistant", streamingResult.Response));
+                return streamingResult;
+            }
+
+            var nonStreamingReply = await ExecuteNonStreamingTurnAsync(conversation, null, status, cancellationToken).ConfigureAwait(false);
+            if (nonStreamingReply is null)
             {
                 conversation.RemoveAt(conversation.Count - 1);
                 return null;
             }
 
-            conversation.Add(new ChatMessage("assistant", result.Response));
-            return result;
+            if (!CliOutput.IsJson)
+            {
+                WriteAssistantPanel(nonStreamingReply.Content);
+            }
+
+            conversation.Add(new ChatMessage("assistant", nonStreamingReply.Content));
+            return new ChatConsoleTurnResult(
+                prompt,
+                nonStreamingReply.Content,
+                nonStreamingReply.FinishReason,
+                nonStreamingReply.PromptTokens,
+                nonStreamingReply.CompletionTokens,
+                nonStreamingReply.PromptTokens + nonStreamingReply.CompletionTokens,
+                streamed: false,
+                nonStreamingReply.ElapsedMilliseconds);
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException)
         {
@@ -401,12 +550,91 @@ internal sealed class ChatConsoleRunner
         }
     }
 
-    private async Task<ChatConsoleTurnResult?> ExecuteNonStreamingTurnAsync(
-        IReadOnlyList<ChatMessage> conversation,
+    private async Task<ChatConsoleTurnResult?> ExecuteToolAwareTurnAsync(
+        List<ChatMessage> conversation,
         string prompt,
+        bool streamed,
+        IChatConsoleStatusIndicator? status,
         CancellationToken cancellationToken)
     {
-        using var request = BuildRequest(conversation, stream: false);
+        var toolDefinitions = await GetToolDefinitionsAsync(cancellationToken).ConfigureAwait(false);
+        var reply = await ExecuteNonStreamingTurnAsync(conversation, toolDefinitions, status, cancellationToken).ConfigureAwait(false);
+        if (reply is null)
+        {
+            return null;
+        }
+
+        var toolCalls = reply.ToolCalls ?? TryParseAssistantToolCalls(reply.Content);
+        if (toolCalls is null || toolCalls.Count == 0)
+        {
+            if (!CliOutput.IsJson)
+            {
+                WriteAssistantPanel(reply.Content);
+            }
+
+            return new ChatConsoleTurnResult(
+                prompt,
+                reply.Content,
+                reply.FinishReason,
+                reply.PromptTokens,
+                reply.CompletionTokens,
+                reply.PromptTokens + reply.CompletionTokens,
+                streamed: false,
+                reply.ElapsedMilliseconds);
+        }
+
+        AppendAssistantToolCallMessage(conversation, string.Empty, toolCalls);
+
+        if (!CliOutput.IsJson)
+        {
+            WriteToolCallPanel(toolCalls);
+        }
+
+        foreach (var toolCall in toolCalls)
+        {
+            var toolResult = await ExecuteToolCallAsync(toolCall, cancellationToken).ConfigureAwait(false);
+            if (!CliOutput.IsJson)
+            {
+                WriteToolResultPanel(toolCall.Name, toolResult);
+            }
+
+            conversation.Add(new ChatMessage("tool", toolResult, toolCall.Id));
+        }
+
+        if (streamed)
+        {
+            return await ExecuteStreamingTurnAsync(conversation, prompt, null, status, cancellationToken).ConfigureAwait(false);
+        }
+
+        var finalReply = await ExecuteNonStreamingTurnAsync(conversation, null, status, cancellationToken).ConfigureAwait(false);
+        if (finalReply is null)
+        {
+            return null;
+        }
+
+        if (!CliOutput.IsJson)
+        {
+            WriteAssistantPanel(finalReply.Content);
+        }
+
+        return new ChatConsoleTurnResult(
+            prompt,
+            finalReply.Content,
+            finalReply.FinishReason,
+            finalReply.PromptTokens,
+            finalReply.CompletionTokens,
+            finalReply.PromptTokens + finalReply.CompletionTokens,
+            streamed: false,
+            finalReply.ElapsedMilliseconds);
+    }
+
+    private async Task<ChatConsoleModelReply?> ExecuteNonStreamingTurnAsync(
+        IReadOnlyList<ChatMessage> conversation,
+        IReadOnlyList<ChatConsoleToolDefinition>? toolDefinitions,
+        IChatConsoleStatusIndicator? status,
+        CancellationToken cancellationToken)
+    {
+        using var request = BuildRequest(conversation, stream: false, toolDefinitions);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(_settings.TimeoutSeconds));
 
@@ -449,29 +677,26 @@ internal sealed class ChatConsoleRunner
         var finishReason = JsonFieldReader.GetString(json, "choices", 0, "finish_reason") ?? "stop";
         var promptTokens = JsonFieldReader.GetInt32(json, "usage", "prompt_tokens") ?? 0;
         var completionTokens = JsonFieldReader.GetInt32(json, "usage", "completion_tokens") ?? 0;
+        var toolCalls = ReadToolCalls(json);
 
-        if (!CliOutput.IsJson)
-        {
-            WriteAssistantPanel(assistant);
-        }
-
-        return new ChatConsoleTurnResult(
-            prompt,
+        status?.Stop();
+        return new ChatConsoleModelReply(
             assistant,
             finishReason,
             promptTokens,
             completionTokens,
-            promptTokens + completionTokens,
-            streamed: false,
-            stopwatch.ElapsedMilliseconds);
+            stopwatch.ElapsedMilliseconds,
+            toolCalls);
     }
 
     private async Task<ChatConsoleTurnResult?> ExecuteStreamingTurnAsync(
         IReadOnlyList<ChatMessage> conversation,
         string prompt,
+        IReadOnlyList<ChatConsoleToolDefinition>? toolDefinitions,
+        IChatConsoleStatusIndicator? status,
         CancellationToken cancellationToken)
     {
-        using var request = BuildRequest(conversation, stream: true);
+        using var request = BuildRequest(conversation, stream: true, toolDefinitions);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(_settings.TimeoutSeconds));
 
@@ -499,7 +724,7 @@ internal sealed class ChatConsoleRunner
         var finishReason = "stop";
         var currentEvent = string.Empty;
         var livePanel = !CliOutput.IsJson && CanLiveRedraw()
-            ? new LiveMarkdownPanel(_output, "Assistant")
+            ? new LiveMarkdownPanel(_output, "Assistant", GetFrameWidth)
             : null;
 
         await using var responseStream = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
@@ -569,6 +794,7 @@ internal sealed class ChatConsoleRunner
             var content = JsonFieldReader.GetString(json, "choices", 0, "delta", "content") ?? string.Empty;
             if (content.Length > 0)
             {
+                status?.Stop();
                 assistant.Append(content);
                 if (livePanel is not null)
                 {
@@ -605,9 +831,20 @@ internal sealed class ChatConsoleRunner
             stopwatch.ElapsedMilliseconds);
     }
 
+    private IChatConsoleStatusIndicator? CreateStatusIndicator()
+    {
+        if (CliOutput.IsJson)
+        {
+            return null;
+        }
+
+        return _statusIndicatorFactory.Create("Waiting on GPU...");
+    }
+
     private HttpRequestMessage BuildRequest(
         IReadOnlyList<ChatMessage> conversation,
-        bool stream)
+        bool stream,
+        IReadOnlyList<ChatConsoleToolDefinition>? toolDefinitions)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, new Uri(_settings.RouterBaseUrl, "/v1/chat/completions"));
 
@@ -618,7 +855,20 @@ internal sealed class ChatConsoleRunner
             messages[index] = new
             {
                 role = message.Role,
-                content = message.Content
+                content = message.Content,
+                tool_call_id = message.ToolCallId,
+                tool_calls = message.ToolCalls is null
+                    ? null
+                    : message.ToolCalls.Select(static toolCall => new
+                    {
+                        id = toolCall.Id,
+                        type = "function",
+                        function = new
+                        {
+                            name = toolCall.Name,
+                            arguments = toolCall.Arguments?.ToJsonString() ?? "{}"
+                        }
+                    }).ToArray()
             };
         }
 
@@ -628,6 +878,20 @@ internal sealed class ChatConsoleRunner
             ["messages"] = messages,
             ["stream"] = stream
         };
+
+        if (toolDefinitions is not null)
+        {
+            payload["tools"] = toolDefinitions.Select(static tool => new
+            {
+                type = "function",
+                function = new
+                {
+                    name = tool.Name,
+                    description = tool.Description,
+                    parameters = tool.InputSchema
+                }
+            }).ToArray();
+        }
 
         if (_settings.Temperature.HasValue)
         {
@@ -642,6 +906,39 @@ internal sealed class ChatConsoleRunner
         var json = JsonSerializer.Serialize(payload, JsonOptions.CreateCompact());
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
         return request;
+    }
+
+    private async Task<IReadOnlyList<ChatConsoleToolDefinition>?> GetToolDefinitionsAsync(CancellationToken cancellationToken)
+    {
+        if (!_settings.EnableToolCalling)
+        {
+            return null;
+        }
+
+        if (_toolDefinitions is not null)
+        {
+            return _toolDefinitions;
+        }
+
+        try
+        {
+            var response = await HttpJson.GetAsync(_httpClient, new Uri(_settings.RouterBaseUrl, "/agent/mcp/tools"), cancellationToken).ConfigureAwait(false);
+            if (response.Success && response.Json is not null)
+            {
+                _toolDefinitions = ParseToolDefinitions(response.Json) ?? BuildFallbackToolDefinitions();
+                return _toolDefinitions;
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException)
+        {
+            if (!CliOutput.IsJson)
+            {
+                _error.WriteLine($"Tool catalog lookup failed, falling back to built-in tools: {ex.Message}");
+            }
+        }
+
+        _toolDefinitions = BuildFallbackToolDefinitions();
+        return _toolDefinitions;
     }
 
     private ChatConsoleSessionResult CreateFailureResult(string errorMessage)
@@ -730,8 +1027,8 @@ internal sealed class ChatConsoleRunner
             lines.Add(FormattableString.Invariant($"Transcript  : {_settings.TranscriptPath}"));
         }
 
-        WriteFramedBlock("Chat Console", lines);
-        _output.WriteLine("Type 'exit' or 'quit' to leave.");
+        WriteFramedBlock("Chat Console", lines, GetFrameWidth());
+        _output.WriteLine("Type 'exit' or 'quit' to leave. Use /paste to pull from the clipboard; if that is unavailable, paste text and finish with /end.");
         _output.WriteLine();
     }
 
@@ -753,6 +1050,472 @@ internal sealed class ChatConsoleRunner
         }
 
         WriteMarkdownBlock("Assistant", response);
+    }
+
+    private static string BuildSearchContext(WebSearchConsoleResult searchResult)
+    {
+        var builder = new StringBuilder();
+        builder.Append("Web search results for: ");
+        builder.AppendLine(searchResult.Query);
+
+        if (!string.IsNullOrWhiteSpace(searchResult.RawText))
+        {
+            builder.AppendLine(searchResult.RawText);
+            return builder.ToString();
+        }
+
+        for (var index = 0; index < searchResult.Results.Count; index++)
+        {
+            var item = searchResult.Results[index];
+            builder.Append(index + 1);
+            builder.Append(". ");
+            builder.AppendLine(item.Title);
+            builder.Append("   ");
+            builder.AppendLine(item.Url);
+            if (!string.IsNullOrWhiteSpace(item.Snippet))
+            {
+                builder.Append("   ");
+                builder.AppendLine(item.Snippet);
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static string BuildWebSearchMarkdown(WebSearchConsoleResult searchResult)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine(FormattableString.Invariant($"Search results for: {searchResult.Query}"));
+        builder.AppendLine();
+
+        if (!string.IsNullOrWhiteSpace(searchResult.RawText))
+        {
+            builder.AppendLine(searchResult.RawText);
+            return builder.ToString();
+        }
+
+        if (searchResult.Results.Count == 0)
+        {
+            builder.AppendLine("No results returned.");
+            return builder.ToString();
+        }
+
+        for (var index = 0; index < searchResult.Results.Count; index++)
+        {
+            var item = searchResult.Results[index];
+            builder.Append(index + 1);
+            builder.Append(". [");
+            builder.Append(item.Title);
+            builder.Append("](");
+            builder.Append(item.Url);
+            builder.AppendLine(")");
+
+            if (!string.IsNullOrWhiteSpace(item.Snippet))
+            {
+                builder.Append("   ");
+                builder.AppendLine(item.Snippet);
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private void AppendAssistantToolCallMessage(
+        List<ChatMessage> conversation,
+        string assistantContent,
+        IReadOnlyList<ChatConsoleToolCall> toolCalls)
+    {
+        if (toolCalls.Count > 0)
+        {
+            conversation.Add(new ChatMessage("assistant", assistantContent, toolCalls: toolCalls));
+        }
+    }
+
+    private async Task<string> ExecuteToolCallAsync(
+        ChatConsoleToolCall toolCall,
+        CancellationToken cancellationToken)
+    {
+        if (string.Equals(toolCall.Name, "web.search", StringComparison.OrdinalIgnoreCase))
+        {
+            var query = toolCall.Arguments?["query"]?.GetValue<string>() ?? string.Empty;
+            var maxResults = toolCall.Arguments?["maxResults"]?.GetValue<int>() ?? 5;
+            var searchResult = await _webSearchToolClient.SearchAsync(query, maxResults, cancellationToken).ConfigureAwait(false);
+            return BuildSearchContext(searchResult);
+        }
+
+        var response = await HttpJson.PostAsync(
+                _httpClient,
+                new Uri(_settings.RouterBaseUrl, "/agent/mcp/tools/call"),
+                new
+                {
+                    toolName = toolCall.Name,
+                    arguments = toolCall.Arguments ?? new JsonObject(),
+                    timeoutSeconds = _settings.TimeoutSeconds,
+                    maxOutputChars = 20_000
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!response.Success)
+        {
+            throw new InvalidOperationException(response.ErrorMessage);
+        }
+
+        return BuildGenericToolContext(toolCall.Name, response.Json);
+    }
+
+    private static string BuildGenericToolContext(string toolName, JsonNode? responseJson)
+    {
+        if (responseJson is null)
+        {
+            return $"Tool '{toolName}' returned no response.";
+        }
+
+        var resultNode = responseJson["result"];
+        if (resultNode is null)
+        {
+            return $"Tool '{toolName}' returned no result payload.";
+        }
+
+        var structured = resultNode["structuredContent"];
+        if (string.Equals(toolName, "activity.route", StringComparison.OrdinalIgnoreCase))
+        {
+            var activityRouteContext = BuildActivityRouteContext(structured, resultNode);
+            if (!string.IsNullOrWhiteSpace(activityRouteContext))
+            {
+                return activityRouteContext;
+            }
+        }
+
+        if (structured is not null)
+        {
+            return structured.ToJsonString(JsonOptions.CreateIndented());
+        }
+
+        var contentText = ReadTextContent(resultNode);
+        if (!string.IsNullOrWhiteSpace(contentText))
+        {
+            return contentText;
+        }
+
+        return resultNode.ToJsonString(JsonOptions.CreateIndented());
+    }
+
+    private static string BuildActivityRouteContext(JsonNode? structured, JsonNode resultNode)
+    {
+        var routeNode = structured as JsonObject ?? resultNode["structuredContent"] as JsonObject;
+        if (routeNode is null)
+        {
+            return string.Empty;
+        }
+
+        var activity = JsonFieldReader.GetString(routeNode, "activity") ?? "unknown";
+        var confidence = TryReadDouble(routeNode["confidence"], out var confidenceValue)
+            ? confidenceValue
+            : 0d;
+        var reason = JsonFieldReader.GetString(routeNode, "reason");
+        var requiresWorkspace = JsonFieldReader.GetBoolean(routeNode, "requiresWorkspace") ?? false;
+        var requiresShell = JsonFieldReader.GetBoolean(routeNode, "requiresShell") ?? false;
+        var requiresStructuredOutput = JsonFieldReader.GetBoolean(routeNode, "requiresStructuredOutput") ?? false;
+        var schemaName = JsonFieldReader.GetString(routeNode, "schemaName");
+
+        var builder = new StringBuilder();
+        builder.Append("Activity route: ");
+        builder.AppendLine(activity);
+        builder.Append("Confidence: ");
+        builder.AppendLine(confidence.ToString("0.###", CultureInfo.InvariantCulture));
+
+        if (!string.IsNullOrWhiteSpace(schemaName))
+        {
+            builder.Append("Schema: ");
+            builder.AppendLine(schemaName);
+        }
+
+        builder.Append("Needs workspace: ");
+        builder.AppendLine(requiresWorkspace ? "yes" : "no");
+        builder.Append("Needs shell: ");
+        builder.AppendLine(requiresShell ? "yes" : "no");
+        builder.Append("Needs structured output: ");
+        builder.AppendLine(requiresStructuredOutput ? "yes" : "no");
+
+        if (!string.IsNullOrWhiteSpace(reason))
+        {
+            builder.Append("Reason: ");
+            builder.AppendLine(reason);
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private static bool TryReadDouble(JsonNode? node, out double value)
+    {
+        if (node is null)
+        {
+            value = default;
+            return false;
+        }
+
+        if (node.GetValueKind() == JsonValueKind.Number && double.TryParse(node.ToString(), NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out value))
+        {
+            return true;
+        }
+
+        return double.TryParse(node.ToString(), NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out value);
+    }
+
+    private static string? ReadTextContent(JsonNode resultNode)
+    {
+        if (resultNode["content"] is not JsonArray contentArray || contentArray.Count == 0)
+        {
+            return null;
+        }
+
+        foreach (var item in contentArray)
+        {
+            if (item is not JsonObject contentObject)
+            {
+                continue;
+            }
+
+            var text = contentObject["text"]?.GetValue<string>();
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                return text;
+            }
+        }
+
+        return null;
+    }
+
+    private void WriteToolCallPanel(IReadOnlyList<ChatConsoleToolCall> toolCalls)
+    {
+        if (CliOutput.IsJson)
+        {
+            return;
+        }
+
+        var lines = new List<string>(toolCalls.Count + 1)
+        {
+            "Model requested tool use:"
+        };
+
+        for (var index = 0; index < toolCalls.Count; index++)
+        {
+            var toolCall = toolCalls[index];
+            lines.Add(FormattableString.Invariant($"{index + 1}. {toolCall.Name}"));
+        }
+
+        WriteFramedBlock("Tool Request", lines, GetFrameWidth());
+    }
+
+    private void WriteToolResultPanel(string toolName, string content)
+    {
+        if (CliOutput.IsJson)
+        {
+            return;
+        }
+
+        var title = string.Equals(toolName, "web.search", StringComparison.OrdinalIgnoreCase)
+            ? "Web Search"
+            : string.Equals(toolName, "activity.route", StringComparison.OrdinalIgnoreCase)
+                ? "Activity Route"
+                : "Tool Result";
+
+        WriteMarkdownBlock(title, content);
+    }
+
+    private static IReadOnlyList<ChatConsoleToolCall>? ReadToolCalls(JsonNode? json)
+    {
+        if (json is null)
+        {
+            return null;
+        }
+
+        var messageNode = json["choices"]?[0]?["message"];
+        if (messageNode is null || messageNode["tool_calls"] is not JsonArray toolCallsArray)
+        {
+            return null;
+        }
+
+        var toolCalls = new List<ChatConsoleToolCall>();
+        foreach (var item in toolCallsArray)
+        {
+            if (item is not JsonObject toolCallObject)
+            {
+                continue;
+            }
+
+            var id = toolCallObject["id"]?.GetValue<string>() ?? string.Empty;
+            var function = toolCallObject["function"] as JsonObject;
+            var name = function?["name"]?.GetValue<string>() ?? string.Empty;
+            var argumentsText = function?["arguments"]?.GetValue<string>() ?? "{}";
+
+            JsonNode? arguments;
+            try
+            {
+                arguments = JsonNode.Parse(argumentsText);
+            }
+            catch (JsonException)
+            {
+                arguments = JsonNode.Parse("{}");
+            }
+
+            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            toolCalls.Add(new ChatConsoleToolCall(id, name, arguments));
+        }
+
+        return toolCalls.Count == 0 ? null : toolCalls;
+    }
+
+    private static IReadOnlyList<ChatConsoleToolCall>? TryParseAssistantToolCalls(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return null;
+        }
+
+        JsonNode? node;
+        try
+        {
+            node = JsonNode.Parse(content);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        if (node is not JsonObject toolCallObject)
+        {
+            return null;
+        }
+
+        var name = toolCallObject["name"]?.GetValue<string>();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return null;
+        }
+
+        var id = toolCallObject["id"]?.GetValue<string>();
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            id = "assistant-content-1";
+        }
+
+        JsonNode? arguments = toolCallObject["arguments"];
+        if (arguments is null && toolCallObject["tool_calls"] is JsonArray toolCallsArray && toolCallsArray.Count > 0)
+        {
+            return ReadToolCallsFromArray(toolCallsArray);
+        }
+
+        if (arguments is JsonValue argumentsValue && argumentsValue.TryGetValue<string>(out var argumentsText))
+        {
+            try
+            {
+                arguments = JsonNode.Parse(argumentsText);
+            }
+            catch (JsonException)
+            {
+                arguments = JsonNode.Parse("{}");
+            }
+        }
+
+        return [new ChatConsoleToolCall(id, name, arguments ?? JsonNode.Parse("{}"))];
+    }
+
+    private static IReadOnlyList<ChatConsoleToolCall>? ReadToolCallsFromArray(JsonArray toolCallsArray)
+    {
+        var toolCalls = new List<ChatConsoleToolCall>();
+        foreach (var item in toolCallsArray)
+        {
+            if (item is not JsonObject toolCallObject)
+            {
+                continue;
+            }
+
+            var id = toolCallObject["id"]?.GetValue<string>() ?? string.Empty;
+            var function = toolCallObject["function"] as JsonObject;
+            var name = function?["name"]?.GetValue<string>() ?? string.Empty;
+            var argumentsText = function?["arguments"]?.GetValue<string>() ?? "{}";
+
+            JsonNode? arguments;
+            try
+            {
+                arguments = JsonNode.Parse(argumentsText);
+            }
+            catch (JsonException)
+            {
+                arguments = JsonNode.Parse("{}");
+            }
+
+            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            toolCalls.Add(new ChatConsoleToolCall(id, name, arguments));
+        }
+
+        return toolCalls.Count == 0 ? null : toolCalls;
+    }
+
+    private static IReadOnlyList<ChatConsoleToolDefinition> BuildFallbackToolDefinitions()
+    {
+        return
+        [
+            new ChatConsoleToolDefinition(
+                "web.search",
+                "Searches the web for a query and returns ranked results.",
+                JsonSerializer.SerializeToElement(new
+                {
+                    type = "object",
+                    additionalProperties = false,
+                    properties = new
+                    {
+                        query = new { type = "string" },
+                        maxResults = new { type = "integer", @default = 5, minimum = 1, maximum = 20 }
+                    },
+                    required = new[] { "query" }
+                }))
+        ];
+    }
+
+    private static IReadOnlyList<ChatConsoleToolDefinition>? ParseToolDefinitions(JsonNode json)
+    {
+        if (json["tools"] is not JsonArray toolsArray || toolsArray.Count == 0)
+        {
+            return null;
+        }
+
+        var mapped = new List<ChatConsoleToolDefinition>(toolsArray.Count);
+        foreach (var item in toolsArray)
+        {
+            if (item is not JsonObject toolObject)
+            {
+                continue;
+            }
+
+            var name = toolObject["name"]?.GetValue<string>() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            var description = toolObject["description"]?.GetValue<string>()
+                ?? toolObject["title"]?.GetValue<string>()
+                ?? string.Empty;
+
+            var schemaNode = toolObject["inputSchema"] ?? new JsonObject();
+            mapped.Add(new ChatConsoleToolDefinition(
+                name,
+                description,
+                JsonSerializer.SerializeToElement(schemaNode)));
+        }
+
+        return mapped.Count == 0 ? null : mapped;
     }
 
     private List<ChatMessage> CreateConversation()
@@ -889,18 +1652,19 @@ internal sealed class ChatConsoleRunner
 
     private void WriteMarkdownBlock(string title, string? content)
     {
-        var lines = MarkdownConsoleFormatter.RenderMarkdown(content, FrameContentWidth);
-        WriteFramedBlock(title, lines, wrapLines: false);
+        var frameWidth = GetFrameWidth();
+        var lines = MarkdownConsoleFormatter.RenderMarkdown(content, frameWidth - 4);
+        WriteFramedBlock(title, lines, frameWidth, wrapLines: false);
     }
 
-    private void WriteFramedBlock(string title, IReadOnlyList<string> lines, bool wrapLines = true)
+    private void WriteFramedBlock(string title, IReadOnlyList<string> lines, int frameWidth, bool wrapLines = true)
     {
         if (CliOutput.IsJson)
         {
             return;
         }
 
-        var preparedLines = wrapLines ? PrepareLines(lines) : new List<string>(lines);
+        var preparedLines = wrapLines ? PrepareLines(lines, frameWidth - 4) : new List<string>(lines);
         var widest = ConsoleTextWidth.GetDisplayWidth(title);
         for (var index = 0; index < preparedLines.Count; index++)
         {
@@ -911,30 +1675,33 @@ internal sealed class ChatConsoleRunner
             }
         }
 
-        var frameWidth = Math.Min(120, Math.Max(FrameWidth, widest + 4));
+        frameWidth = Math.Min(MaxFrameWidth, Math.Max(frameWidth, widest + 4));
         var fillLength = Math.Max(0, frameWidth - ConsoleTextWidth.GetDisplayWidth(title) - 5);
-        _output.WriteLine($"╭─ {title} {new string('─', fillLength)}╮");
+        _output.Write("╭─ ");
+        _output.Write(title);
+        _output.Write(' ');
+        _output.WriteRepeated('─', fillLength);
+        _output.WriteLine("╮");
 
         for (var index = 0; index < preparedLines.Count; index++)
         {
             var line = preparedLines[index];
             var padding = Math.Max(0, frameWidth - ConsoleTextWidth.GetDisplayWidth(line) - 4);
-            _output.WriteLine($"│ {line}{new string(' ', padding)} │");
+            _output.Write("│ ");
+            _output.Write(line);
+            _output.WriteRepeated(' ', padding);
+            _output.WriteLine(" │");
         }
 
-        _output.WriteLine($"╰{new string('─', Math.Max(0, frameWidth - 2))}╯");
+        _output.Write("╰");
+        _output.WriteRepeated('─', Math.Max(0, frameWidth - 2));
+        _output.WriteLine("╯");
     }
 
-    private static List<string> PrepareLines(IReadOnlyList<string> lines)
+    private static List<string> PrepareLines(IReadOnlyList<string> lines, int contentWidth)
     {
-        var prepared = MarkdownConsoleFormatter.WrapPlainLines(lines, FrameContentWidth);
+        var prepared = MarkdownConsoleFormatter.WrapPlainLines(lines, contentWidth);
         return new List<string>(prepared);
-    }
-
-    private static bool IsExitCommand(string value)
-    {
-        return string.Equals(value.Trim(), "exit", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(value.Trim(), "quit", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ExtractErrorMessage(string body, string fallback)
@@ -965,24 +1732,54 @@ internal sealed class ChatConsoleRunner
         return TerminalCapabilities.SupportsAnsiEscapes(_output);
     }
 
+    private static int GetFrameWidth()
+    {
+        var terminalWidth = GetTerminalWidth();
+        if (terminalWidth > 0)
+        {
+            return Math.Clamp(terminalWidth - 2, MinFrameWidth, MaxFrameWidth);
+        }
+
+        return MinFrameWidth;
+    }
+
+    private static int GetTerminalWidth()
+    {
+        try
+        {
+            if (Console.IsOutputRedirected)
+            {
+                return 0;
+            }
+
+            var width = Console.WindowWidth;
+            return width > 0 ? width : 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
     private sealed class LiveMarkdownPanel
     {
         private readonly TextWriter _writer;
         private readonly string _title;
-        private readonly int _frameWidth;
+        private readonly Func<int> _frameWidthFactory;
         private int _renderedLineCount;
         private bool _started;
 
-        public LiveMarkdownPanel(TextWriter writer, string title)
+        public LiveMarkdownPanel(TextWriter writer, string title, Func<int> frameWidthFactory)
         {
             _writer = writer;
             _title = title;
-            _frameWidth = FrameWidth;
+            _frameWidthFactory = frameWidthFactory ?? throw new ArgumentNullException(nameof(frameWidthFactory));
         }
 
         public void Render(string? content)
         {
-            var lines = MarkdownConsoleFormatter.RenderMarkdown(content, _frameWidth - 4);
+            var frameWidth = _frameWidthFactory();
+            var lines = MarkdownConsoleFormatter.RenderMarkdown(content, frameWidth - 4);
             Redraw(lines);
         }
 
@@ -1030,32 +1827,62 @@ internal sealed class ChatConsoleRunner
                     widest = width;
                 }
             }
-
-            var frameWidth = Math.Min(120, Math.Max(FrameWidth, widest + 4));
+            var frameWidth = Math.Min(MaxFrameWidth, Math.Max(_frameWidthFactory(), widest + 4));
             var fillLength = Math.Max(0, frameWidth - ConsoleTextWidth.GetDisplayWidth(_title) - 5);
-            _writer.WriteLine($"╭─ {_title} {new string('─', fillLength)}╮");
+            _writer.Write("╭─ ");
+            _writer.Write(_title);
+            _writer.Write(' ');
+            _writer.WriteRepeated('─', fillLength);
+            _writer.WriteLine("╮");
 
             for (var index = 0; index < lines.Count; index++)
             {
                 var padding = Math.Max(0, frameWidth - ConsoleTextWidth.GetDisplayWidth(lines[index]) - 4);
-                _writer.WriteLine($"│ {lines[index]}{new string(' ', padding)} │");
+                _writer.Write("│ ");
+                _writer.Write(lines[index]);
+                _writer.WriteRepeated(' ', padding);
+                _writer.WriteLine(" │");
             }
 
-            _writer.WriteLine($"╰{new string('─', Math.Max(0, frameWidth - 2))}╯");
+            _writer.Write("╰");
+            _writer.WriteRepeated('─', Math.Max(0, frameWidth - 2));
+            _writer.WriteLine("╯");
             _writer.Flush();
         }
     }
 
     private sealed class ChatMessage
     {
-        public ChatMessage(string role, string content)
+        public ChatMessage(string role, string content, string? toolCallId = null, IReadOnlyList<ChatConsoleToolCall>? toolCalls = null)
         {
             Role = string.IsNullOrWhiteSpace(role) ? throw new ArgumentException("Role is required.", nameof(role)) : role;
             Content = content ?? string.Empty;
+            ToolCallId = string.IsNullOrWhiteSpace(toolCallId) ? null : toolCallId;
+            ToolCalls = toolCalls;
         }
 
         public string Role { get; }
 
         public string Content { get; }
+
+        public string? ToolCallId { get; }
+
+        public IReadOnlyList<ChatConsoleToolCall>? ToolCalls { get; }
+    }
+
+    private sealed class ChatConsoleToolDefinition
+    {
+        public ChatConsoleToolDefinition(string name, string description, JsonElement inputSchema)
+        {
+            Name = name;
+            Description = description;
+            InputSchema = inputSchema;
+        }
+
+        public string Name { get; }
+
+        public string Description { get; }
+
+        public JsonElement InputSchema { get; }
     }
 }

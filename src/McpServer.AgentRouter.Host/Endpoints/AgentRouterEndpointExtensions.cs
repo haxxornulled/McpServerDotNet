@@ -11,6 +11,7 @@ using ApiSsh = McpServer.AgentRouter.Host.Protocol.Ssh;
 using McpServer.AgentRouter.Domain.AgentLoops;
 using McpServer.AgentRouter.Domain.Inference;
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 
 namespace McpServer.AgentRouter.Host.Endpoints;
 
@@ -358,7 +359,7 @@ public static class AgentRouterEndpointExtensions
                 return LanguageExt.Common.Error.New($"messages[{index}].role is required.");
             }
 
-            messages.Add(new ChatTurnMessage(message.Role, message.Content ?? string.Empty));
+            messages.Add(MapChatTurnMessage(message));
         }
 
         var profileName = string.IsNullOrWhiteSpace(request.Model)
@@ -369,7 +370,8 @@ public static class AgentRouterEndpointExtensions
             modelProfileName: profileName,
             messages: messages,
             temperature: request.Temperature,
-            maxOutputTokens: request.MaxTokens));
+            maxOutputTokens: request.MaxTokens,
+            tools: MapToolDefinitions(request.Tools)));
     }
 
     private static OpenAiChatCompletionResponse MapChatCompletionResponse(
@@ -395,9 +397,12 @@ public static class AgentRouterEndpointExtensions
             Message = new OpenAiChatMessage
             {
                 Role = "assistant",
-                Content = turn.Content
+                Content = turn.Content,
+                ToolCalls = MapOutboundToolCalls(turn.ToolCalls)
             },
-            FinishReason = string.IsNullOrWhiteSpace(turn.FinishReason) ? "stop" : turn.FinishReason
+            FinishReason = turn.ToolCalls is { Count: > 0 }
+                ? "tool_calls"
+                : string.IsNullOrWhiteSpace(turn.FinishReason) ? "stop" : turn.FinishReason
         });
 
         return response;
@@ -847,6 +852,99 @@ public static class AgentRouterEndpointExtensions
             TimeoutSeconds = request.TimeoutSeconds,
             MaxOutputChars = request.MaxOutputChars
         };
+    }
+
+    private static ChatTurnMessage MapChatTurnMessage(OpenAiChatMessage message)
+    {
+        var toolCalls = MapInboundToolCalls(message.ToolCalls);
+        return new ChatTurnMessage(
+            message.Role,
+            message.Content ?? string.Empty,
+            message.ToolCallId,
+            toolCalls);
+    }
+
+    private static IReadOnlyList<ChatToolDefinition>? MapToolDefinitions(IList<OpenAiToolDefinition>? tools)
+    {
+        if (tools is null || tools.Count == 0)
+        {
+            return null;
+        }
+
+        var mapped = new List<ChatToolDefinition>(tools.Count);
+        foreach (var tool in tools)
+        {
+            if (tool is null || tool.Function is null)
+            {
+                continue;
+            }
+
+            mapped.Add(new ChatToolDefinition(
+                tool.Function.Name,
+                tool.Function.Description,
+                tool.Function.Parameters));
+        }
+
+        return mapped.Count == 0 ? null : mapped;
+    }
+
+    private static IReadOnlyList<ChatToolCall>? MapInboundToolCalls(IList<OpenAiChatToolCall>? toolCalls)
+    {
+        if (toolCalls is null || toolCalls.Count == 0)
+        {
+            return null;
+        }
+
+        var mapped = new List<ChatToolCall>(toolCalls.Count);
+        foreach (var toolCall in toolCalls)
+        {
+            if (toolCall is null)
+            {
+                continue;
+            }
+
+            JsonElement arguments;
+            try
+            {
+                arguments = JsonDocument.Parse(string.IsNullOrWhiteSpace(toolCall.Function?.Arguments) ? "{}" : toolCall.Function.Arguments).RootElement.Clone();
+            }
+            catch (JsonException)
+            {
+                arguments = JsonDocument.Parse("{}").RootElement.Clone();
+            }
+
+            mapped.Add(new ChatToolCall(
+                toolCall.Id,
+                toolCall.Function?.Name ?? string.Empty,
+                arguments));
+        }
+
+        return mapped.Count == 0 ? null : mapped;
+    }
+
+    private static IList<OpenAiChatToolCall>? MapOutboundToolCalls(IReadOnlyList<ChatToolCall>? toolCalls)
+    {
+        if (toolCalls is null || toolCalls.Count == 0)
+        {
+            return null;
+        }
+
+        var mapped = new List<OpenAiChatToolCall>(toolCalls.Count);
+        foreach (var toolCall in toolCalls)
+        {
+            mapped.Add(new OpenAiChatToolCall
+            {
+                Id = toolCall.Id,
+                Type = "function",
+                Function = new OpenAiChatToolFunction
+                {
+                    Name = toolCall.Name,
+                    Arguments = toolCall.Arguments.GetRawText()
+                }
+            });
+        }
+
+        return mapped;
     }
 
     private static ApiMcp.McpToolCallResponse MapMcpToolCallResponse(Domain.Mcp.McpToolCallResponse response)
